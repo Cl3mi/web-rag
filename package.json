@@ -1,0 +1,41 @@
+{
+	"name": "web-rag-lab",
+	"private": true,
+	"version": "0.0.1",
+	"type": "module",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"prepare": "svelte-kit sync || echo ''",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"db:push": "bunx drizzle-kit push",
+		"db:generate": "bunx drizzle-kit generate",
+		"db:studio": "bunx drizzle-kit studio"
+	},
+	"devDependencies": {
+		"@sveltejs/adapter-auto": "^7.0.0",
+		"@sveltejs/kit": "^2.50.2",
+		"@sveltejs/vite-plugin-svelte": "^6.2.4",
+		"@types/jsdom": "^27.0.0",
+		"@types/turndown": "^5.0.6",
+		"drizzle-kit": "^0.31.9",
+		"svelte": "^5.49.2",
+		"svelte-check": "^4.3.6",
+		"typescript": "^5.9.3",
+		"vite": "^7.3.1"
+	},
+	"dependencies": {
+		"@mozilla/readability": "^0.6.0",
+		"@xenova/transformers": "^2.17.2",
+		"chart.js": "^4.5.1",
+		"drizzle-orm": "^0.45.1",
+		"gpt-tokenizer": "^3.4.0",
+		"jsdom": "^28.0.0",
+		"natural": "^8.1.0",
+		"postgres": "^3.4.8",
+		"svelte-chartjs": "^3.1.5",
+		"turndown": "^7.2.2"
+	}
+}

@@ -1,0 +1,66 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: web-rag-lab-db
+    environment:
+      POSTGRES_USER: rag_user
+      POSTGRES_PASSWORD: rag_password
+      POSTGRES_DB: web_rag_lab
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag_user -d web_rag_lab"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: web-rag-lab-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 60s
+      retries: 10
+      start_period: 300s
+
+  # Ollama with NVIDIA GPU support (use: docker compose --profile gpu up ollama-gpu)
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: web-rag-lab-ollama-gpu
+    profiles: ["gpu"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+      - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-llama3.2}
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 30s
+      retries: 10
+      start_period: 300s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  pgdata:
+  ollama_data:
