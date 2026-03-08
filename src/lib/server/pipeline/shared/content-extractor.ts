@@ -187,19 +187,28 @@ export function extractContent(
   // Get content HTML
   let contentHtml = article?.content || document.body?.innerHTML || '';
 
+  // Prevent word concatenation caused by adjacent inline elements with no whitespace between them.
+  // The DOM's .textContent concatenates sibling element text nodes directly, so
+  // <span>Performance-Monitoring</span><span>Liefert</span> becomes "Performance-MonitoringLiefert".
+  // We insert a space after each closing inline tag when it is immediately followed by:
+  //   (a) a letter or digit (including Latin Extended / German umlauts), or
+  //   (b) another opening inline tag.
+  // Punctuation like "word</em>." is left unchanged to avoid "word ." artefacts.
+  const _it = 'span|p|button|a|strong|em|b|i|code|abbr|cite|sub|sup|mark|time|var|kbd|samp|small|ins|del';
+  contentHtml = contentHtml
+    .replace(new RegExp(`</(${_it})>(?=[A-Za-zÀ-ÖØ-öø-ÿ\\u0100-\\u024F0-9])`, 'gi'), '</$1> ')
+    .replace(new RegExp(`</(${_it})>(?=<(?:${_it})[\\s>])`, 'gi'), '</$1> ');
+
   // Convert to markdown
   const turndown = createTurndownService(options);
 
-  // Create a new DOM for the content to convert
+  // Create a new DOM for the content to convert (uses the spacing-fixed contentHtml)
   const contentDom = new JSDOM(contentHtml);
   const markdownContent = turndown.turndown(contentDom.window.document.body);
 
-  // Get plain text
-  let textContent = article?.textContent || '';
-  if (!textContent) {
-    // Fallback: extract text from content HTML
-    textContent = contentDom.window.document.body.textContent || '';
-  }
+  // Get plain text from the processed DOM so it benefits from the spacing fix above.
+  // Falls back to article.textContent if the DOM body is unexpectedly empty.
+  let textContent = contentDom.window.document.body.textContent || article?.textContent || '';
 
   // Clean up text content
   textContent = textContent

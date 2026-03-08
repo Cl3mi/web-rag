@@ -42,7 +42,7 @@ export const EMBEDDING_DIMENSION = 1024;
 // Vector search defaults
 export const VECTOR_SEARCH_DEFAULTS = {
   matchCount: 10,
-  similarityThreshold: 0.3,
+  similarityThreshold: 0.1,
   hybridAlpha: 0.7, // Weight for dense similarity in hybrid search
 };
 

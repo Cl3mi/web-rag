@@ -285,7 +285,8 @@ export interface RagJudgeResult {
   hallucination: boolean;
   judgeMean: number;
   judgeStd: number;
-  failureType: 'generation_failure' | 'retrieval_failure' | 'robust_generation' | null;
+  failureType: 'generation_failure' | 'retrieval_failure' | 'robust_generation' | 'hallucination_failure' | null;
+  answerableFromContext: boolean | null;
   judgeModel: string;
   createdAt: Date;
 }
@@ -314,7 +315,7 @@ export interface RagModel {
   createdAt: Date;
 }
 
-export type FailureType = 'generation_failure' | 'retrieval_failure' | 'robust_generation' | 'normal';
+export type FailureType = 'generation_failure' | 'retrieval_failure' | 'robust_generation' | 'normal' | 'hallucination_failure';
 
 export interface PipelineQualityMetrics {
   pipelineName: string;

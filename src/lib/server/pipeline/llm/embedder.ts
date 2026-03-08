@@ -1,11 +1,11 @@
 /**
  * LLM Chunk Embedder
  *
- * Embeds the combination of summary + original content for better retrieval.
- * The summary provides semantic focus while the original preserves details.
+ * Dense embedding: summary + first 500 chars of original (semantic focus).
+ * Sparse embedding: original_content (preserves exact vocabulary for BM25 matching).
  */
 
-import { embedDense, embedBatchDense } from '$lib/server/embeddings/bge-m3';
+import { embedDense, embedBatchDense, embedSparse } from '$lib/server/embeddings/bge-m3';
 import type { SummarizedChunk } from './summarizer';
 
 export interface EmbeddedLLMChunk {
@@ -13,6 +13,7 @@ export interface EmbeddedLLMChunk {
   originalContent: string;
   summary: string;
   denseEmbedding: number[];
+  sparseVector: Record<string, number>;
   metadata: {
     chunkType: string;
     tokenCount: number;
@@ -53,6 +54,9 @@ export async function embedLLMChunks(
     originalContent: chunk.originalContent,
     summary: chunk.summary,
     denseEmbedding: embeddings[i],
+    // Sparse vector over original_content so BM25 matches the actual vocabulary
+    // of the source text, not the abstract summary vocabulary.
+    sparseVector: embedSparse(chunk.originalContent),
     metadata: chunk.metadata,
   }));
 }

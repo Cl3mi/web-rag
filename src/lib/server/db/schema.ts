@@ -98,6 +98,8 @@ export const factsChunks = pgTable(
     confidence: real('confidence').notNull().default(1.0),
     // Dense embedding stored as vector type
     denseEmbedding: vector('dense_embedding', EMBEDDING_DIMENSION),
+    // Sparse (BM25-style) vector for hybrid search
+    sparseVector: jsonb('sparse_vector').$type<Record<string, number>>().default({}),
     sourceContext: text('source_context'),
     metadata: jsonb('metadata').$type<{
       extractedFrom?: string;
@@ -244,8 +246,9 @@ export const ragJudgeResults = pgTable(
     judgeMean: real('judge_mean').notNull(),
     judgeStd: real('judge_std').notNull(),
     failureType: varchar('failure_type', { length: 30 }).$type<
-      'generation_failure' | 'retrieval_failure' | 'robust_generation' | 'normal' | null
+      'generation_failure' | 'retrieval_failure' | 'robust_generation' | 'normal' | 'hallucination_failure' | null
     >(),
+    answerableFromContext: boolean('answerable_from_context'),
     judgeModel: text('judge_model').notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },

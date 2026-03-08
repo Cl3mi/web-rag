@@ -42,8 +42,10 @@ export async function hybridSearch(
     ? `AND tc.document_id = ANY(ARRAY[${opts.documentIds.map((id) => `'${id}'::uuid`).join(',')}])`
     : '';
 
-  // Fetch more results for hybrid reranking
-  const fetchCount = opts.topK * 3;
+  // Fetch more results for hybrid reranking.
+  // A larger pool gives the sparse BM25 component a fair chance to surface
+  // keyword-relevant documents that rank low on dense (semantic) similarity.
+  const fetchCount = opts.topK * 10;
 
   // Dense vector search using pgvector
   const results = await sql`

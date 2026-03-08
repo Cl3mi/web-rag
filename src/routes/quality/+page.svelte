@@ -6,6 +6,7 @@
     generation_failure: number;
     retrieval_failure: number;
     robust_generation: number;
+    hallucination_failure: number;
     unclassified: number;
   }
 
@@ -59,6 +60,7 @@
     question: string;
     pipelineName: string;
     generatedAnswer: string;
+    retrievedContext: string;
     groundedness: number;
     completeness: number;
     correctness: number;
@@ -94,6 +96,7 @@
   let failureDetailPipeline = $state<string | null>(null);
   let failureDetailLoading = $state(false);
   let expandedDetailId = $state<string | null>(null);
+  let expandedContextId = $state<string | null>(null);
 
   // Judge configuration
   let judgeRuns = $state(3);
@@ -156,10 +159,11 @@
         meanCompleteness:    cur.meanCompleteness  - prev.meanCompleteness,
         hallucinationRate:   cur.hallucinationRate - prev.hallucinationRate,
         judgeMean:           cur.judgeMean         - prev.judgeMean,
-        normal:              cur.failureBreakdown.normal              - prev.failureBreakdown.normal,
-        generation_failure:  cur.failureBreakdown.generation_failure  - prev.failureBreakdown.generation_failure,
-        retrieval_failure:   cur.failureBreakdown.retrieval_failure   - prev.failureBreakdown.retrieval_failure,
-        robust_generation:   cur.failureBreakdown.robust_generation   - prev.failureBreakdown.robust_generation,
+        normal:                cur.failureBreakdown.normal                - prev.failureBreakdown.normal,
+        generation_failure:    cur.failureBreakdown.generation_failure    - prev.failureBreakdown.generation_failure,
+        retrieval_failure:     cur.failureBreakdown.retrieval_failure     - prev.failureBreakdown.retrieval_failure,
+        robust_generation:     cur.failureBreakdown.robust_generation     - prev.failureBreakdown.robust_generation,
+        hallucination_failure: cur.failureBreakdown.hallucination_failure - prev.failureBreakdown.hallucination_failure,
       };
     }
     return result;
@@ -220,6 +224,7 @@
     failureDetailPipeline = pipeline ?? null;
     failureDetailError = '';
     expandedDetailId = null;
+    expandedContextId = null;
     try {
       const params = new URLSearchParams({ details: '1' });
       if (failureType) params.set('failureType', failureType);
@@ -250,6 +255,7 @@
     failureDetailFilter = null;
     failureDetailPipeline = null;
     expandedDetailId = null;
+    expandedContextId = null;
   }
 
   function failureTypeLabel(ft: string | null): string {
@@ -258,6 +264,7 @@
       case 'generation_failure': return 'Gen Failure';
       case 'retrieval_failure': return 'Ret Failure';
       case 'robust_generation': return 'Robust Gen';
+      case 'hallucination_failure': return 'Hallucination';
       default: return 'Unclassified';
     }
   }
@@ -268,6 +275,7 @@
       case 'generation_failure': return 'ft-gen-fail';
       case 'retrieval_failure': return 'ft-ret-fail';
       case 'robust_generation': return 'ft-robust';
+      case 'hallucination_failure': return 'ft-halluc';
       default: return 'ft-unclassified';
     }
   }
@@ -561,6 +569,13 @@
               <span class="legend-desc">Retrieved wrong documents but still generated a decent answer. Model compensated.</span>
             </div>
           </div>
+          <div class="legend-item">
+            <span class="legend-dot halluc"></span>
+            <div>
+              <strong>Hallucination Failure</strong>
+              <span class="legend-desc">Retrieved the right documents but invented content not present in the context. Fix generation faithfulness.</span>
+            </div>
+          </div>
         </div>
 
         <div class="failure-table-wrapper">
@@ -572,6 +587,7 @@
                 <th>Generation Failure</th>
                 <th>Retrieval Failure</th>
                 <th>Robust Generation</th>
+                <th>Hallucination</th>
                 {#if failurePipelines.some(p => failureMetrics[p].failureBreakdown.unclassified > 0)}
                   <th>Unclassified</th>
                 {/if}
@@ -619,6 +635,15 @@
                       <span class="ft-delta" class:delta-up={frg < 0} class:delta-down={frg > 0}>{frg > 0 ? '+' : ''}{frg}</span>
                     {/if}
                   </td>
+                  <td class="failure-cell">
+                    <button class="failure-link halluc" onclick={() => loadFailureDetails('hallucination_failure', pipeline)} disabled={fb.hallucination_failure === 0}>
+                      {fb.hallucination_failure} <span class="failure-pct">({pctOf(fb.hallucination_failure, total)}%)</span>
+                    </button>
+                    {#if (deltaMetrics?.[pipeline]?.['hallucination_failure'] ?? 0) !== 0}
+                      {@const fhf = deltaMetrics?.[pipeline]?.['hallucination_failure'] ?? 0}
+                      <span class="ft-delta" class:delta-up={fhf < 0} class:delta-down={fhf > 0}>{fhf > 0 ? '+' : ''}{fhf}</span>
+                    {/if}
+                  </td>
                   {#if failurePipelines.some(p => failureMetrics[p].failureBreakdown.unclassified > 0)}
                     <td class="failure-cell">
                       <button class="failure-link" onclick={() => loadFailureDetails('unclassified', pipeline)} disabled={fb.unclassified === 0}>
@@ -651,6 +676,9 @@
                 {/if}
                 {#if fb.robust_generation > 0}
                   <button class="bar-segment robust" style="width: {(fb.robust_generation / total) * 100}%" title="Robust Generation: {fb.robust_generation}" onclick={() => loadFailureDetails('robust_generation', pipeline)}></button>
+                {/if}
+                {#if fb.hallucination_failure > 0}
+                  <button class="bar-segment halluc" style="width: {(fb.hallucination_failure / total) * 100}%" title="Hallucination: {fb.hallucination_failure}" onclick={() => loadFailureDetails('hallucination_failure', pipeline)}></button>
                 {/if}
                 {#if fb.unclassified > 0}
                   <button class="bar-segment unclassified" style="width: {(fb.unclassified / total) * 100}%" title="Unclassified: {fb.unclassified}" onclick={() => loadFailureDetails('unclassified', pipeline)}></button>
@@ -710,6 +738,22 @@
                           Completeness: {row.completeness}/5 |
                           Recall@k: {row.recallAtK !== null ? row.recallAtK.toFixed(2) : 'N/A'}
                         </div>
+                        <button
+                          class="detail-context-toggle"
+                          onclick={() => expandedContextId = expandedContextId === row.id ? null : row.id}
+                        >
+                          {expandedContextId === row.id ? '▲ Hide' : '▼ Show'} Retrieved Context
+                        </button>
+                        {#if expandedContextId === row.id}
+                          <div class="detail-context-label">Retrieved Context (passed to LLM):</div>
+                          <div class="detail-context-chunks">
+                            {#each row.retrievedContext.split(/\n\n(?=\[\d+\])/) as chunk, i}
+                              <div class="detail-context-chunk">
+                                <pre class="detail-context-text">{chunk}</pre>
+                              </div>
+                            {/each}
+                          </div>
+                        {/if}
                       </div>
                     {/if}
                   </div>
@@ -1139,6 +1183,7 @@
   .legend-dot.gen-fail { background: #e74c3c; }
   .legend-dot.ret-fail { background: #f39c12; }
   .legend-dot.robust { background: #3498db; }
+  .legend-dot.halluc { background: #9b59b6; }
 
   .legend-item strong {
     color: #ddd;
@@ -1203,6 +1248,7 @@
   .failure-count.gen-fail { color: #e74c3c; }
   .failure-count.ret-fail { color: #f39c12; }
   .failure-count.robust { color: #3498db; }
+  .failure-count.halluc { color: #9b59b6; }
 
   .failure-pct {
     font-size: 0.75rem;
@@ -1245,6 +1291,7 @@
   .bar-segment.gen-fail { background: #e74c3c; }
   .bar-segment.ret-fail { background: #f39c12; }
   .bar-segment.robust { background: #3498db; }
+  .bar-segment.halluc { background: #9b59b6; }
   .bar-segment.unclassified { background: #666; }
 
   /* Stats Row */
@@ -1543,6 +1590,7 @@
   .failure-link.gen-fail { color: #e74c3c; }
   .failure-link.ret-fail { color: #f39c12; }
   .failure-link.robust { color: #3498db; }
+  .failure-link.halluc { color: #9b59b6; }
 
   /* Clickable bar segments */
   .bar-segment {
@@ -1683,6 +1731,60 @@
     color: #888;
   }
 
+  .detail-context-toggle {
+    margin-top: 10px;
+    background: none;
+    border: 1px solid #555;
+    color: #aaa;
+    font-size: 0.75rem;
+    padding: 3px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .detail-context-toggle:hover {
+    border-color: #888;
+    color: #ddd;
+  }
+
+  .detail-context-label {
+    margin-top: 10px;
+    font-size: 0.75rem;
+    color: #888;
+    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .detail-context-chunks {
+    max-height: 350px;
+    overflow-y: auto;
+    border: 1px solid #333;
+    border-radius: 4px;
+    background: #1a1a2e;
+  }
+
+  .detail-context-chunk {
+    border-bottom: 1px solid #333;
+  }
+  .detail-context-chunk:last-child {
+    border-bottom: none;
+  }
+
+  .detail-context-text {
+    font-size: 0.8rem;
+    color: #bbb;
+    padding: 8px 12px;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    line-height: 1.5;
+    font-family: inherit;
+  }
+
+  .detail-context-text::first-line {
+    color: #7aa2d4;
+    font-weight: 600;
+  }
+
   /* Failure type badges */
   .ft-badge {
     font-size: 0.72rem;
@@ -1696,6 +1798,7 @@
   .ft-gen-fail { background: rgba(231, 76, 60, 0.15); color: #e74c3c; }
   .ft-ret-fail { background: rgba(243, 156, 18, 0.15); color: #f39c12; }
   .ft-robust { background: rgba(52, 152, 219, 0.15); color: #3498db; }
+  .ft-halluc { background: rgba(155, 89, 182, 0.15); color: #9b59b6; }
   .ft-unclassified { background: rgba(255, 255, 255, 0.05); color: #888; }
 
   /* Pipeline badge in samples table */

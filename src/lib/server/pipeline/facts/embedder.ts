@@ -1,15 +1,18 @@
 /**
  * Facts Pipeline Embedder
  *
- * Generates dense embeddings only (no sparse vectors) for atomic facts.
+ * Generates dense + sparse embeddings for atomic facts.
+ * Sparse (BM25-style) is computed from sourceContext (±1 surrounding sentences)
+ * to give keyword matching a richer signal than the bare fact sentence alone.
  */
 
-import { embedDense, embedBatchDense } from '$lib/server/embeddings/bge-m3';
+import { embedDense, embedBatchDense, embedSparse } from '$lib/server/embeddings/bge-m3';
 import type { ExtractedFact } from './extractor';
 
 export interface FactWithEmbedding extends ExtractedFact {
   factIndex: number;
   denseEmbedding: number[];
+  sparseVector: Record<string, number>;
 }
 
 /**
@@ -19,12 +22,17 @@ export async function embedFact(
   fact: ExtractedFact,
   factIndex: number
 ): Promise<FactWithEmbedding> {
+  // Dense embedding on the atomic fact sentence — precise, topic-specific signal.
+  // Sparse embedding on sourceContext (±1 surrounding sentence) — richer vocabulary
+  // for BM25 keyword matching. Keeping them on different spans is intentional:
+  // dense finds semantically similar facts, sparse re-ranks by keyword overlap.
   const embedding = await embedDense(fact.content);
 
   return {
     ...fact,
     factIndex,
     denseEmbedding: embedding,
+    sparseVector: embedSparse(fact.sourceContext || fact.content),
   };
 }
 
@@ -34,6 +42,7 @@ export async function embedFact(
 export async function embedFacts(facts: ExtractedFact[]): Promise<FactWithEmbedding[]> {
   if (facts.length === 0) return [];
 
+  // Dense on atomic fact sentence; sparse on sourceContext. See embedFact().
   const texts = facts.map((fact) => fact.content);
   const embeddings = await embedBatchDense(texts);
 
@@ -41,6 +50,7 @@ export async function embedFacts(facts: ExtractedFact[]): Promise<FactWithEmbedd
     ...fact,
     factIndex: i,
     denseEmbedding: embeddings[i],
+    sparseVector: embedSparse(fact.sourceContext || fact.content),
   }));
 }
 

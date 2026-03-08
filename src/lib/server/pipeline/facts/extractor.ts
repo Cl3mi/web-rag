@@ -15,7 +15,7 @@
 import natural from 'natural';
 import type { FactCategory } from '$lib/types';
 
-const { SentenceTokenizer, WordTokenizer, PorterStemmer } = natural;
+const { SentenceTokenizer } = natural;
 
 export interface ExtractedFact {
   content: string;
@@ -35,10 +35,17 @@ export interface FactExtractionOptions {
   includeContext?: boolean;
 }
 
-// SentenceTokenizer needs abbreviation list
-const abbreviations = ['dr', 'mr', 'mrs', 'ms', 'prof', 'inc', 'ltd', 'jr', 'sr', 'vs', 'etc', 'e.g', 'i.e'];
+// SentenceTokenizer needs abbreviation list — include German degrees and common abbreviations
+// so "M.Sc." / "B.Sc." / "z.B." / etc. are not treated as sentence boundaries.
+const abbreviations = [
+  // English
+  'dr', 'mr', 'mrs', 'ms', 'prof', 'inc', 'ltd', 'jr', 'sr', 'vs', 'etc', 'e.g', 'i.e',
+  // Academic degrees
+  'M.Sc', 'B.Sc', 'Ph.D', 'M.A', 'B.A', 'Mag', 'Dipl',
+  // German common abbreviations
+  'inkl', 'bzw', 'ggf', 'usw', 'z.B', 'd.h', 'u.a', 'sog', 'ca', 'Nr', 'Str', 'Abs', 'Tel', 'bzgl',
+];
 const sentenceTokenizer = new SentenceTokenizer(abbreviations);
-const wordTokenizer = new WordTokenizer();
 
 // Keywords for category classification
 const categoryKeywords: Record<FactCategory, string[]> = {
@@ -95,14 +102,34 @@ export function extractFacts(
   const facts: ExtractedFact[] = [];
 
   // Clean and normalize text
-  const cleanText = text
+  let cleanText = text
     .replace(/\r\n/g, '\n')
     .replace(/\t/g, ' ')
-    .replace(/\s+/g, ' ')
     .trim();
 
+  // Pre-process: replace checkmark/bullet separators used in pricing/feature lists
+  // e.g. "✓ Starter ✓ Pro ✓ Premium" → "Starter. Pro. Premium"
+  // These never contain sentence-ending periods, so the tokenizer sees one giant run-on.
+  cleanText = cleanText.replace(/[✓✗✘•◦▪▸►→]/g, '. ');
+
+  // Pre-process: protect German date patterns from being treated as sentence ends.
+  // We temporarily replace trailing periods with a placeholder, tokenize, then restore.
+  const GERMAN_DATE_PLACEHOLDER = '\u2060DATE\u2060'; // word-joiner, invisible
+
+  // (a) dd.mm. patterns like "09.11." / "08.02." (month-day pairs in date tables)
+  cleanText = cleanText.replace(/\b(\d{1,2}\.\d{1,2})\./g, `$1${GERMAN_DATE_PLACEHOLDER}`);
+
+  // (b) Bare day numbers that open a date range: "01. - 03.12." / "22. – 24.06."
+  //     The period is followed by optional whitespace and a dash/en-dash, signalling
+  //     a range continuation ("01. - 03.12.2025") not a sentence end.
+  cleanText = cleanText.replace(/\b(\d{1,2})\.\s*([-–])/g, `$1${GERMAN_DATE_PLACEHOLDER} $2`);
+
+  cleanText = cleanText.replace(/\s+/g, ' ').trim();
+
   // Split into sentences
-  const sentences = sentenceTokenizer.tokenize(cleanText);
+  const rawSentences = sentenceTokenizer.tokenize(cleanText);
+  // Restore the placeholder back to a period in each sentence
+  const sentences = rawSentences.map((s) => s.replace(new RegExp(GERMAN_DATE_PLACEHOLDER, 'g'), '.'));
 
   // Process each sentence
   for (let i = 0; i < sentences.length && facts.length < maxFacts; i++) {
@@ -125,11 +152,11 @@ export function extractFacts(
         ? getContext(sentences, i)
         : sentence;
 
-      // Make fact standalone if needed
-      const standaloneFact = makeStandalone(sentence, context);
-
+      // Store the raw sentence as content — pronoun "resolution" via makeStandalone
+      // corrupts embeddings (it replaces pronouns with the first capitalized noun it
+      // finds, which is usually wrong and lowers cosine similarity to real queries).
       facts.push({
-        content: standaloneFact,
+        content: sentence,
         category,
         confidence,
         sourceContext: context,
@@ -140,6 +167,13 @@ export function extractFacts(
       });
     }
   }
+
+  // Aggregate consecutive pricing plan facts into composite plan facts so that
+  // queries like "Welche Preisoptionen gibt es?" retrieve a fact containing the
+  // plan name, price AND features together rather than isolated atomic feature
+  // fragments (e.g. "1.000 Chat-Sessions/Monat." with no price context).
+  const pricingComposites = extractPricingPlanFacts(facts, maxFacts - facts.length);
+  facts.push(...pricingComposites);
 
   // Also extract facts from lists and bullet points
   const listFacts = extractListFacts(text, minConfidence, maxFacts - facts.length);
@@ -301,34 +335,64 @@ function getContext(sentences: string[], index: number): string {
   return sentences.slice(start, end).join(' ');
 }
 
+
 /**
- * Make a fact standalone by resolving pronouns and references
+ * Detect pricing plan blocks in the already-extracted sentence facts and create
+ * one composite fact per plan that joins the plan header (price) with all its
+ * feature sentences.
+ *
+ * Detection heuristic:
+ * - A fact whose content matches a price pattern ("290€ / Monat") opens a plan block.
+ * - Subsequent facts shorter than MAX_FEATURE_LENGTH are treated as features of that plan.
+ * - A long fact (≥ MAX_FEATURE_LENGTH chars) or another price-bearing fact closes the block.
+ *
+ * The composite content is self-contained ("Starter für einfache Websites 290€/Monat:
+ * Bis zu 200 Website-Seiten, Bis zu 5 PDF-Dokumente, ...") so it embeds and ranks
+ * well for both pricing overview queries and specific feature queries.
  */
-function makeStandalone(sentence: string, context: string): string {
-  // Simple pronoun resolution - could be improved with proper NLP
-  let result = sentence;
+function extractPricingPlanFacts(
+  facts: ExtractedFact[],
+  maxFacts: number,
+): ExtractedFact[] {
+  const PRICE_PATTERN = /\d[\d.,]*\s*€\s*\/\s*Monat/i;
+  const MAX_FEATURE_LENGTH = 120;
+  const composites: ExtractedFact[] = [];
 
-  // If sentence starts with pronoun, try to find antecedent
-  const pronounStarts = ['it ', 'they ', 'this ', 'these ', 'that '];
+  let planHeader: ExtractedFact | null = null;
+  let planFeatures: string[] = [];
 
-  for (const pronoun of pronounStarts) {
-    if (result.toLowerCase().startsWith(pronoun)) {
-      // Extract potential antecedent from context
-      const contextWords = wordTokenizer.tokenize(context) || [];
-      const capitalizedNouns = contextWords.filter(
-        (w) => /^[A-Z][a-z]+$/.test(w) && !['The', 'This', 'That', 'It'].includes(w)
-      );
+  const flush = () => {
+    if (planHeader && planFeatures.length > 0 && composites.length < maxFacts) {
+      const headerText = planHeader.content.replace(/\.\s*$/, '');
+      const composite = `${headerText}: ${planFeatures.join(', ')}.`;
+      composites.push({
+        content: composite,
+        category: 'SPEC',
+        confidence: 0.9,
+        sourceContext: composite,
+        metadata: { extractedFrom: 'Pricing plan composite' },
+      });
+    }
+    planHeader = null;
+    planFeatures = [];
+  };
 
-      if (capitalizedNouns.length > 0) {
-        // Replace pronoun with first noun found
-        const noun = capitalizedNouns[0];
-        result = noun + result.slice(pronoun.trim().length);
-      }
-      break;
+  for (const fact of facts) {
+    if (composites.length >= maxFacts) break;
+
+    if (PRICE_PATTERN.test(fact.content)) {
+      flush();
+      planHeader = fact;
+    } else if (planHeader !== null && fact.content.length <= MAX_FEATURE_LENGTH) {
+      planFeatures.push(fact.content.replace(/\.\s*$/, ''));
+    } else if (planHeader !== null) {
+      // Long fact signals end of pricing block
+      flush();
     }
   }
+  flush();
 
-  return result;
+  return composites;
 }
 
 /**
@@ -356,11 +420,24 @@ function extractListFacts(
     const confidence = calculateConfidence(item, entities) - 0.1; // Slightly lower for list items
 
     if (confidence >= minConfidence) {
+      // Build sourceContext from the last non-list, non-empty line before this item.
+      // List items almost always depend on an implicit subject from a heading or
+      // intro sentence above them (e.g. "Features: - supports X" — without the
+      // heading "Features:" the item "supports X" is meaningless in isolation).
+      const textBefore = text.slice(0, match.index);
+      const precedingLines = textBefore.split('\n').filter(
+        (l) => l.trim() && !/^[\s]*[-*•\d+\.]\s+/.test(l)
+      );
+      const precedingLine = precedingLines.length > 0
+        ? precedingLines[precedingLines.length - 1].trim()
+        : '';
+      const sourceContext = precedingLine ? `${precedingLine} ${item}` : item;
+
       facts.push({
         content: item,
         category,
         confidence,
-        sourceContext: item,
+        sourceContext,
         metadata: {
           extractedFrom: `List item: ${item}`,
           entities: entities.length > 0 ? entities : undefined,

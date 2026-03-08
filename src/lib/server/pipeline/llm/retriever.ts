@@ -6,7 +6,8 @@
  */
 
 import { sql } from '$lib/server/db/client';
-import { embedDense } from '$lib/server/embeddings/bge-m3';
+import { embed, sparseSimilarity } from '$lib/server/embeddings/bge-m3';
+import { VECTOR_SEARCH_DEFAULTS } from '$lib/config/database';
 import type { SearchResult } from '$lib/types';
 
 export interface LLMSearchOptions {
@@ -16,7 +17,7 @@ export interface LLMSearchOptions {
 
 const DEFAULT_OPTIONS: Required<LLMSearchOptions> = {
   topK: 10,
-  minScore: 0.3,
+  minScore: 0.1,
 };
 
 /**
@@ -28,11 +29,14 @@ export async function searchLLMChunks(
 ): Promise<SearchResult[]> {
   const { topK, minScore } = { ...DEFAULT_OPTIONS, ...options };
 
-  // Get query embedding
-  const queryEmbedding = await embedDense(query);
-  const embeddingStr = `[${queryEmbedding.join(',')}]`;
+  // Get query embedding (dense + sparse for hybrid search)
+  const queryEmbedding = await embed(query);
+  const embeddingStr = `[${queryEmbedding.dense.join(',')}]`;
 
-  // Vector similarity search
+  // Fetch larger candidate pool for hybrid re-ranking
+  const fetchCount = topK * 10;
+
+  // Dense vector search — candidate pool
   const results = await sql`
     SELECT
       lc.id,
@@ -40,26 +44,44 @@ export async function searchLLMChunks(
       lc.chunk_index,
       lc.original_content,
       lc.summary,
+      lc.sparse_vector,
       lc.metadata,
       d.url as source_url,
       d.title as source_title,
-      1 - (lc.dense_embedding <=> ${embeddingStr}::vector) as similarity
+      1 - (lc.dense_embedding <=> ${embeddingStr}::vector) as dense_score
     FROM llm_chunks lc
     JOIN documents d ON lc.document_id = d.id
     WHERE lc.dense_embedding IS NOT NULL
     ORDER BY lc.dense_embedding <=> ${embeddingStr}::vector
-    LIMIT ${topK * 2}
+    LIMIT ${fetchCount}
   `;
 
+  // Hybrid re-ranking: alpha * dense + (1 - alpha) * sparse
+  const alpha = VECTOR_SEARCH_DEFAULTS.hybridAlpha;
+  const scored = results.map((r) => {
+    const denseScore = r.dense_score as number;
+    const sparseScore = sparseSimilarity(
+      queryEmbedding.sparse,
+      (r.sparse_vector as Record<string, number>) || {}
+    );
+    return { ...r, similarity: alpha * denseScore + (1 - alpha) * sparseScore };
+  });
+
+  scored.sort((a, b) => b.similarity - a.similarity);
+
   // Filter by minimum score and format results
-  const filtered = results
-    .filter((r) => (r.similarity as number) >= minScore)
+  const filtered = scored
+    .filter((r) => r.similarity >= minScore)
     .slice(0, topK);
 
   return filtered.map((r) => ({
     id: r.id as string,
-    // Return summary + original for richer context
-    content: `Summary: ${r.summary}\n\nDetails: ${r.original_content}`,
+    // Use original_content as context — the embedding was trained on
+    // summary+original (good retrieval), but the generated summary is too
+    // lossy (1-2 sentences) for the LLM and judge to answer specific fact
+    // queries. Serving original_content gives the full detail needed while
+    // the context window limit (8 000 chars) provides natural length control.
+    content: r.original_content as string,
     score: r.similarity as number,
     documentId: r.document_id as string,
     metadata: {

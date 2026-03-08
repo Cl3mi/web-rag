@@ -442,15 +442,15 @@ export function calculateFactCompressionRatio(
   const ratios: number[] = [];
 
   for (const result of results) {
-    const metadata = result.metadata as { sourceContext?: string };
-    if (metadata.sourceContext && result.content.length > 0) {
-      ratios.push(metadata.sourceContext.length / result.content.length);
+    const metadata = result.metadata as { factContent?: string };
+    if (metadata.factContent && result.content.length > 0) {
+      ratios.push(metadata.factContent.length / result.content.length);
     }
   }
 
   if (ratios.length === 0) {
     if (results.length > 0) {
-      console.warn('Fact compression: No results had sourceContext metadata. Defaulting to 1.0.');
+      console.warn('Fact compression: No results had factContent metadata. Defaulting to 1.0.');
     }
     return { avgCompressionRatio: 1, minCompressionRatio: 1, maxCompressionRatio: 1 };
   }

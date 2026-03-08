@@ -123,6 +123,91 @@ function parseSitemapXml(xml: string): SitemapUrl[] {
 }
 
 /**
+ * Recursively parse a sitemap URL, following sitemap indexes to collect all page URLs.
+ */
+export async function parseSitemapDeep(
+  sitemapUrl: string,
+  options: ScraperOptions = {},
+  _visited: Set<string> = new Set()
+): Promise<SitemapUrl[]> {
+  if (_visited.has(sitemapUrl)) return [];
+  _visited.add(sitemapUrl);
+
+  const {
+    rateLimiter = conservativeRateLimiter,
+    timeout = DEFAULT_TIMEOUT,
+    userAgent = DEFAULT_USER_AGENT,
+  } = options;
+
+  await rateLimiter.acquire();
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
+  let xml: string;
+  try {
+    const response = await fetch(sitemapUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': userAgent,
+        'Accept': 'application/xml, text/xml, */*',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to fetch sitemap: ${response.status} ${response.statusText}`);
+    }
+
+    xml = await response.text();
+  } finally {
+    clearTimeout(timeoutId);
+  }
+
+  // Check if this is a sitemap index — if so, recurse into each child sitemap
+  const sitemapIndexMatch = xml.match(/<sitemapindex[^>]*>([\s\S]*?)<\/sitemapindex>/i);
+  if (sitemapIndexMatch) {
+    const childUrls: string[] = [];
+    const sitemapMatches = xml.matchAll(/<sitemap[^>]*>([\s\S]*?)<\/sitemap>/gi);
+    for (const match of sitemapMatches) {
+      const locMatch = match[1].match(/<loc[^>]*>([^<]+)<\/loc>/i);
+      if (locMatch) {
+        childUrls.push(locMatch[1].trim());
+      }
+    }
+
+    const results: SitemapUrl[] = [];
+    for (const childUrl of childUrls) {
+      const childPages = await parseSitemapDeep(childUrl, options, _visited);
+      results.push(...childPages);
+    }
+    return results;
+  }
+
+  // Regular urlset — parse page URLs
+  const urls: SitemapUrl[] = [];
+  const urlMatches = xml.matchAll(/<url[^>]*>([\s\S]*?)<\/url>/gi);
+
+  for (const match of urlMatches) {
+    const urlContent = match[1];
+
+    const locMatch = urlContent.match(/<loc[^>]*>([^<]+)<\/loc>/i);
+    if (!locMatch) continue;
+
+    const url: SitemapUrl = { loc: locMatch[1].trim() };
+
+    const lastmodMatch = urlContent.match(/<lastmod[^>]*>([^<]+)<\/lastmod>/i);
+    if (lastmodMatch) url.lastmod = lastmodMatch[1].trim();
+
+    const priorityMatch = urlContent.match(/<priority[^>]*>([^<]+)<\/priority>/i);
+    if (priorityMatch) url.priority = parseFloat(priorityMatch[1].trim());
+
+    urls.push(url);
+  }
+
+  return urls;
+}
+
+/**
  * Discover sitemap URLs for a domain
  */
 export async function discoverSitemaps(

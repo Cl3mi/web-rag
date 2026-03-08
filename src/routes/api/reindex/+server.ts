@@ -100,11 +100,11 @@ export const POST: RequestHandler = async ({ request }) => {
               await sql`
                 INSERT INTO facts_chunks (
                   document_id, fact_index, content, category, confidence,
-                  dense_embedding, source_context, metadata
+                  dense_embedding, sparse_vector, source_context, metadata
                 ) VALUES (
                   ${documentId}, ${fact.factIndex}, ${fact.content}, ${fact.category},
-                  ${fact.confidence}, ${embeddingStr}::vector, ${fact.sourceContext},
-                  ${JSON.stringify(fact.metadata)}
+                  ${fact.confidence}, ${embeddingStr}::vector, ${JSON.stringify(fact.sparseVector)},
+                  ${fact.sourceContext}, ${JSON.stringify(fact.metadata)}
                 )
               `;
             }
@@ -123,10 +123,11 @@ export const POST: RequestHandler = async ({ request }) => {
               await sql`
                 INSERT INTO llm_chunks (
                   document_id, chunk_index, original_content, summary,
-                  dense_embedding, metadata
+                  dense_embedding, sparse_vector, metadata
                 ) VALUES (
                   ${documentId}, ${chunk.index}, ${chunk.originalContent}, ${chunk.summary},
-                  ${embeddingStr}::vector, ${JSON.stringify(chunk.metadata)}
+                  ${embeddingStr}::vector, ${JSON.stringify(chunk.sparseVector)},
+                  ${JSON.stringify(chunk.metadata)}
                 )
               `;
             }

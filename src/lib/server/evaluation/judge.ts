@@ -28,6 +28,15 @@ const REFUSAL_PATTERNS = [
   /\b(not|n'?t)\b.{0,15}\b(available|present|found|mentioned)\b.{0,25}\b(in|from|within)\b.{0,25}\b(the )?(context|documents?|provided|retrieved)\b/i,
   // "I don't have enough information to answer"
   /\bI (don'?t|do not|cannot|can'?t) have (enough |sufficient |any )?(information|context|details?) (to |for )/i,
+  // German: "nicht ... im/in dem/aus dem bereitgestell..." — covers "nicht direkt im bereitgestellten Text"
+  /\bnicht\b.{0,60}\b(im|in (dem|diesem)|aus (dem|diesem))\b.{0,20}\bbereitgestell/i,
+  // German: "bereitgestell... nicht ... abgeleitet/entnommen/gefunden/beantwortet" — covers
+  // "aus dem bereitgestellten Kontext nicht direkt abgeleitet werden"
+  /\bbereitgestell\w*.{0,80}\bnicht\b.{0,40}\b(abgeleitet|entnommen|gefunden|beantwortet|bestimmt)\b/i,
+  // German: generic inability — "Es ist nicht möglich" / "kann nicht beantwortet werden"
+  /\b(Es ist nicht möglich|kann nicht\b.{0,20}\b(beantwortet|abgeleitet|bestimmt) werden)\b/i,
+  // German: "keine Informationen/Angaben in dem bereitgestellten Text/Kontext"
+  /\b(keine?|nicht genug|nicht ausreichend).{0,20}(Informationen?|Angaben?|Details?).{0,30}(in (dem|den|diesem)|aus (dem|den)).{0,30}(Text|Kontext|Dokumenten?|bereitgestellt)/i,
 ];
 
 function isRefusalAnswer(answer: string): boolean {
@@ -36,6 +45,18 @@ function isRefusalAnswer(answer: string): boolean {
 
 const OLLAMA_BASE_URL = env.OLLAMA_URL || 'http://localhost:11434';
 const DEFAULT_JUDGE_MODEL = env.OLLAMA_JUDGE_MODEL || env.OLLAMA_MODEL || 'llama3.2';
+
+// Must match MAX_CONTEXT_LENGTH in evaluate/+server.ts so the judge sees the
+// same context window the LLM used during generation.
+const JUDGE_CONTEXT_LENGTH = 8000;
+
+// Classification thresholds — named constants so the decision criteria are explicit
+// and can be updated in one place.
+const RECALL_THRESHOLD = 0.5;    // recallAtK >= this → retrieval is considered adequate
+const JUDGE_MEAN_THRESHOLD = 3.0; // judgeMean >= this → generation is considered adequate
+// Intentionally lower than the training "chosen" threshold (3.5):
+// an answer can be "working" (normal) without being good enough
+// for training positive examples.
 
 
 const JUDGE_PROMPT = `You are a strict and deterministic evaluator for a Retrieval-Augmented Generation (RAG) system.
@@ -241,12 +262,12 @@ function parseJudgeResponse(response: string): JudgeScores | null {
         const hallucination = parsed.hallucination === true || parsed.hallucination === 'true';
         const answerableFromContext =
           parsed.answerable_from_context === false ||
-          parsed.answerable_from_context === 'false'
+            parsed.answerable_from_context === 'false'
             ? false
             : parsed.answerable_from_context === true ||
               parsed.answerable_from_context === 'true'
-            ? true
-            : undefined;
+              ? true
+              : undefined;
 
         if (
           groundedness >= 1 && groundedness <= 5 &&
@@ -265,19 +286,40 @@ function parseJudgeResponse(response: string): JudgeScores | null {
 }
 
 /**
- * Classify failure type based on retrieval recall, judge mean score, and
- * whether the judge determined the context actually contained the answer.
+ * Classify failure type based on retrieval recall, judge mean score, hallucination,
+ * and whether the judge determined the context actually contained the answer.
  *
- * Matrix:
- *   answerableFromContext = false                         → "retrieval_failure" (context never had the answer)
- *   Recall >= 0.5 AND JudgeMean >= 3.0                   → "normal"
- *   Recall >= 0.5 AND JudgeMean < 3.0                    → "generation_failure" (found docs but bad answer)
- *   Recall < 0.5  AND JudgeMean < 3.0                    → "retrieval_failure"
- *   Recall < 0.5  AND JudgeMean >= 3.0                   → "robust_generation"
+ * Priority order (higher priority checked first):
  *
- * Note: this threshold (3.0) is intentionally lower than the "chosen" threshold (3.5).
- * An answer with judgeMean 3.0–3.5 is a working answer (normal) but not good enough
- * for training positive examples (not chosen). These are different questions.
+ * 0.5. answerableFromContext = false AND hallucination = true AND recallAtK >= RECALL_THRESHOLD
+ *    → "hallucination_failure": retrieval was adequate, judge says the invented
+ *    claim is not in the context (answerableFromContext=false for the hallucinated
+ *    claim), but recall confirms the right docs were retrieved. Root cause is the
+ *    model generating false content, not a retrieval gap.
+ *
+ * 1. answerableFromContext = false
+ *    → "retrieval_failure": context never contained the answer.
+ *    Note: this fires regardless of recallAtK. Even if the expected docs were
+ *    retrieved (high recall), the judge determined they don't actually contain
+ *    the answer — the ground-truth labels may be incomplete or the expected docs
+ *    are insufficient. Either way the root cause is on the retrieval/data side.
+ *
+ * 2. hallucination = true AND recallAtK >= RECALL_THRESHOLD
+ *    → "hallucination_failure": retrieval was adequate but the model invented
+ *    content not present in the context. Distinct from generation_failure (low
+ *    quality) — this is a faithfulness failure even when scores look acceptable.
+ *
+ * 3. recallAtK >= RECALL_THRESHOLD AND judgeMean >= JUDGE_MEAN_THRESHOLD
+ *    → "normal": good retrieval and good answer.
+ *
+ * 4. recallAtK >= RECALL_THRESHOLD AND judgeMean < JUDGE_MEAN_THRESHOLD
+ *    → "generation_failure": retrieved the right docs but produced a poor answer.
+ *
+ * 5. recallAtK < RECALL_THRESHOLD AND judgeMean < JUDGE_MEAN_THRESHOLD
+ *    → "retrieval_failure": wrong docs and poor answer — root cause is retrieval.
+ *
+ * 6. recallAtK < RECALL_THRESHOLD AND judgeMean >= JUDGE_MEAN_THRESHOLD
+ *    → "robust_generation": wrong docs but model still produced a decent answer.
  *
  * judgeMean (avg of groundedness + completeness + correctness) is used instead
  * of groundedness alone so that "I don't have information" refusals — which
@@ -287,22 +329,31 @@ function parseJudgeResponse(response: string): JudgeScores | null {
 function classifyFailureType(
   recallAtK: number | null,
   judgeMean: number,
+  hallucination: boolean = false,
   answerableFromContext?: boolean
 ): FailureType | null {
   if (recallAtK === null) return null;
 
-  // Judge explicitly determined the context didn't contain the answer — root cause is retrieval.
+  const goodRetrieval = recallAtK >= RECALL_THRESHOLD;
+
+  // Priority 0.5: model hallucinated with adequate retrieval, and the judge
+  // correctly flagged the invented claim as not in context. This looks like
+  // Priority-1 (answerableFromContext=false) but the root cause is generation,
+  // not retrieval — the right docs were retrieved, the model made up content.
+  if (answerableFromContext === false && hallucination && goodRetrieval) return 'hallucination_failure';
+
+  // Priority 1: judge explicitly determined the context didn't contain the answer.
   if (answerableFromContext === false) return 'retrieval_failure';
 
-  const goodRetrieval = recallAtK >= 0.5;
-  const goodGeneration = judgeMean >= 3.0;
+  // Priority 2: model hallucinated despite adequate retrieval — faithfulness failure.
+  if (hallucination && goodRetrieval) return 'hallucination_failure';
+
+  const goodGeneration = judgeMean >= JUDGE_MEAN_THRESHOLD;
 
   if (goodRetrieval && goodGeneration) return 'normal';
   if (goodRetrieval && !goodGeneration) return 'generation_failure';
   if (!goodRetrieval && !goodGeneration) return 'retrieval_failure';
-  if (!goodRetrieval && goodGeneration) return 'robust_generation';
-
-  return null;
+  /* !goodRetrieval && goodGeneration */return 'robust_generation';
 }
 
 /**
@@ -321,7 +372,7 @@ async function callJudgeOnce(
         prompt,
         stream: false,
         options: {
-          temperature: 0.1,
+          temperature: 0,
           top_p: 1,
           num_predict: 200,
         },
@@ -352,7 +403,7 @@ async function judgeRow(
 ): Promise<JudgeScores | null> {
   const prompt = JUDGE_PROMPT
     .replace('{question}', row.question)
-    .replace('{context}', row.retrieved_context.slice(0, 6000))
+    .replace('{context}', row.retrieved_context.slice(0, JUDGE_CONTEXT_LENGTH))
     .replace('{answer}', row.generated_answer);
 
   const results: JudgeScores[] = [];
@@ -465,12 +516,15 @@ export async function runJudge(options: {
         }
       }
 
-      // Belt-and-suspenders: detect refusals by answer text even if LLM missed it
-      if (isRefusalAnswer(row.generated_answer)) {
+      // Belt-and-suspenders: detect refusals by answer text even if LLM missed it.
+      // Only override answerableFromContext when retrieval was also poor (low recall).
+      // If recall is adequate but the model refused, that is a generation failure —
+      // forcing answerableFromContext=false would misclassify it as retrieval_failure.
+      if (isRefusalAnswer(row.generated_answer) && (recallAtK === null || recallAtK < RECALL_THRESHOLD)) {
         scores.answerableFromContext = false;
       }
 
-      const failureType = classifyFailureType(recallAtK, mean, scores.answerableFromContext);
+      const failureType = classifyFailureType(recallAtK, mean, scores.hallucination, scores.answerableFromContext);
 
       // DB columns are integer — round averaged scores before storing.
       // Float precision is preserved in judge_mean (real column).
@@ -478,19 +532,22 @@ export async function runJudge(options: {
       // store all scores as 0 — they carry no generation-quality signal and the
       // judge's Case-C scores (5/5/5) would otherwise inflate metric averages.
       const unanswerable = scores.answerableFromContext === false;
-      const gRounded  = unanswerable ? 0 : Math.round(scores.groundedness);
+      const gRounded = unanswerable ? 0 : Math.round(scores.groundedness);
       const cmRounded = unanswerable ? 0 : Math.round(scores.completeness);
       const crRounded = unanswerable ? 0 : Math.round(scores.correctness);
       const meanToStore = unanswerable ? 0 : mean;
-      const stdToStore  = unanswerable ? 0 : std;
+      const stdToStore = unanswerable ? 0 : std;
+      // Store answerableFromContext so repairFailureTypes() can use it without
+      // re-calling the judge.
+      const answerableToStore = scores.answerableFromContext ?? null;
 
       await sql`
         INSERT INTO rag_judge_results (
           evaluation_id, groundedness_score, completeness_score, correctness_score,
-          hallucination, judge_mean, judge_std, failure_type, judge_model
+          hallucination, judge_mean, judge_std, failure_type, answerable_from_context, judge_model
         ) VALUES (
           ${row.id}, ${gRounded}, ${cmRounded}, ${crRounded},
-          ${scores.hallucination}, ${meanToStore}, ${stdToStore}, ${failureType}, ${judgeModel}
+          ${scores.hallucination}, ${meanToStore}, ${stdToStore}, ${failureType}, ${answerableToStore}, ${judgeModel}
         )
       `;
 
@@ -521,6 +578,8 @@ export async function repairFailureTypes(): Promise<{ repaired: number }> {
       jr.id as judge_id,
       jr.judge_mean,
       jr.failure_type,
+      jr.hallucination,
+      jr.answerable_from_context,
       re.id as eval_id,
       re.recall_at_k,
       re.retrieved_doc_ids,
@@ -528,8 +587,12 @@ export async function repairFailureTypes(): Promise<{ repaired: number }> {
     FROM rag_judge_results jr
     JOIN rag_runs_evaluation re ON jr.evaluation_id = re.id
     WHERE jr.failure_type IS NULL
-       OR (jr.failure_type = 'robust_generation' AND jr.judge_mean < 3)
-       OR (jr.failure_type = 'generation_failure' AND re.recall_at_k IS NOT NULL AND re.recall_at_k < 0.5)
+       OR (jr.failure_type = 'robust_generation'  AND jr.judge_mean < ${JUDGE_MEAN_THRESHOLD})
+       OR (jr.failure_type = 'generation_failure' AND re.recall_at_k IS NOT NULL AND re.recall_at_k < ${RECALL_THRESHOLD})
+       OR (jr.failure_type IN ('normal', 'generation_failure') AND jr.hallucination = true AND re.recall_at_k >= ${RECALL_THRESHOLD})
+       OR (jr.failure_type = 'retrieval_failure' AND jr.hallucination = true AND jr.answerable_from_context = false AND re.recall_at_k IS NOT NULL AND re.recall_at_k >= ${RECALL_THRESHOLD})
+       -- Revert any content_gap rows created by the bad bulk reclassification — they are retrieval_failures
+       OR jr.failure_type = 'content_gap'
   `;
 
   if (rows.length === 0) return { repaired: 0 };
@@ -564,9 +627,17 @@ export async function repairFailureTypes(): Promise<{ repaired: number }> {
       }
     }
 
-    // Re-classify using judge_mean (not groundedness alone).
-    // answerableFromContext is not stored, so we rely on the mean signal.
-    const failureType = classifyFailureType(recallAtK, Number(row.judge_mean));
+    // Re-classify using all available signals. answerableFromContext is now
+    // stored in the DB; rows judged before that column existed will have NULL,
+    // which is treated as undefined (falls through to recall-based logic).
+    const answerableFromContext =
+      row.answerable_from_context === null ? undefined : Boolean(row.answerable_from_context);
+    const failureType = classifyFailureType(
+      recallAtK,
+      Number(row.judge_mean),
+      Boolean(row.hallucination),
+      answerableFromContext
+    );
 
     if (failureType !== null && failureType !== (row.failure_type as string)) {
       await sql`
@@ -601,11 +672,12 @@ export async function getQualityMetrics(): Promise<Record<string, {
       AVG(CASE WHEN jr.hallucination THEN 1.0 ELSE 0.0 END) FILTER (WHERE jr.judge_mean > 0) as hallucination_rate,
       AVG(NULLIF(jr.judge_mean, 0)) as judge_mean,
       COUNT(*) FILTER (WHERE jr.judge_mean > 0) as total_judged,
-      COUNT(CASE WHEN jr.failure_type = 'generation_failure' THEN 1 END) as gen_failures,
-      COUNT(CASE WHEN jr.failure_type = 'retrieval_failure' THEN 1 END) as ret_failures,
-      COUNT(CASE WHEN jr.failure_type = 'robust_generation' THEN 1 END) as robust_gen,
-      COUNT(CASE WHEN jr.failure_type = 'normal' THEN 1 END) as normal,
-      COUNT(CASE WHEN jr.failure_type IS NULL THEN 1 END) as unclassified
+      COUNT(CASE WHEN jr.failure_type = 'generation_failure'    THEN 1 END) as gen_failures,
+      COUNT(CASE WHEN jr.failure_type = 'retrieval_failure'     THEN 1 END) as ret_failures,
+      COUNT(CASE WHEN jr.failure_type = 'robust_generation'     THEN 1 END) as robust_gen,
+      COUNT(CASE WHEN jr.failure_type = 'normal'                THEN 1 END) as normal,
+      COUNT(CASE WHEN jr.failure_type = 'hallucination_failure' THEN 1 END) as halluc_failures,
+      COUNT(CASE WHEN jr.failure_type IS NULL                   THEN 1 END) as unclassified
     FROM rag_judge_results jr
     JOIN rag_runs_evaluation re ON jr.evaluation_id = re.id
     GROUP BY re.pipeline_name
@@ -635,6 +707,7 @@ export async function getQualityMetrics(): Promise<Record<string, {
         generation_failure: Number(row.gen_failures) || 0,
         retrieval_failure: Number(row.ret_failures) || 0,
         robust_generation: Number(row.robust_gen) || 0,
+        hallucination_failure: Number(row.halluc_failures) || 0,
         unclassified: Number(row.unclassified) || 0,
       },
     };
@@ -692,6 +765,7 @@ export interface JudgeDetailRow {
   question: string;
   pipelineName: string;
   generatedAnswer: string;
+  retrievedContext: string;
   groundedness: number;
   completeness: number;
   correctness: number;
@@ -747,6 +821,7 @@ export async function getJudgeDetails(options: {
       re.question,
       re.pipeline_name,
       re.generated_answer,
+      re.retrieved_context,
       re.recall_at_k,
       jr.groundedness_score,
       jr.completeness_score,
@@ -768,6 +843,7 @@ export async function getJudgeDetails(options: {
     question: r.question as string,
     pipelineName: r.pipeline_name as string,
     generatedAnswer: (r.generated_answer as string).slice(0, 500),
+    retrievedContext: r.retrieved_context as string,
     groundedness: Number(r.groundedness_score),
     completeness: Number(r.completeness_score),
     correctness: Number(r.correctness_score),
@@ -802,11 +878,12 @@ export async function getQualityMetricsByRun(runId: string): Promise<Record<stri
       AVG(CASE WHEN jr.hallucination THEN 1.0 ELSE 0.0 END) FILTER (WHERE jr.judge_mean > 0) as hallucination_rate,
       AVG(NULLIF(jr.judge_mean, 0)) as judge_mean,
       COUNT(*) FILTER (WHERE jr.judge_mean > 0) as total_judged,
-      COUNT(CASE WHEN jr.failure_type = 'generation_failure' THEN 1 END) as gen_failures,
-      COUNT(CASE WHEN jr.failure_type = 'retrieval_failure' THEN 1 END) as ret_failures,
-      COUNT(CASE WHEN jr.failure_type = 'robust_generation' THEN 1 END) as robust_gen,
-      COUNT(CASE WHEN jr.failure_type = 'normal' THEN 1 END) as normal,
-      COUNT(CASE WHEN jr.failure_type IS NULL THEN 1 END) as unclassified
+      COUNT(CASE WHEN jr.failure_type = 'generation_failure'    THEN 1 END) as gen_failures,
+      COUNT(CASE WHEN jr.failure_type = 'retrieval_failure'     THEN 1 END) as ret_failures,
+      COUNT(CASE WHEN jr.failure_type = 'robust_generation'     THEN 1 END) as robust_gen,
+      COUNT(CASE WHEN jr.failure_type = 'normal'                THEN 1 END) as normal,
+      COUNT(CASE WHEN jr.failure_type = 'hallucination_failure' THEN 1 END) as halluc_failures,
+      COUNT(CASE WHEN jr.failure_type IS NULL                   THEN 1 END) as unclassified
     FROM rag_judge_results jr
     JOIN rag_runs_evaluation re ON jr.evaluation_id = re.id
     WHERE re.run_id = ${runId}
@@ -828,6 +905,7 @@ export async function getQualityMetricsByRun(runId: string): Promise<Record<stri
         generation_failure: Number(row.gen_failures) || 0,
         retrieval_failure: Number(row.ret_failures) || 0,
         robust_generation: Number(row.robust_gen) || 0,
+        hallucination_failure: Number(row.halluc_failures) || 0,
         unclassified: Number(row.unclassified) || 0,
       },
     };

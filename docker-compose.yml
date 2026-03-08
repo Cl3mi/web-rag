@@ -1,7 +1,7 @@
 services:
   postgres:
     image: pgvector/pgvector:pg16
-    container_name: web-rag-lab-db
+    container_name: web-rag-db
     environment:
       POSTGRES_USER: rag_user
       POSTGRES_PASSWORD: rag_password
@@ -18,7 +18,7 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: web-rag-lab-ollama
+    container_name: web-rag-ollama
     ports:
       - "11434:11434"
     volumes:
@@ -37,7 +37,7 @@ services:
   # Ollama with NVIDIA GPU support (use: docker compose --profile gpu up ollama-gpu)
   ollama-gpu:
     image: ollama/ollama:latest
-    container_name: web-rag-lab-ollama-gpu
+    container_name: web-rag-ollama-gpu
     profiles: ["gpu"]
     ports:
       - "11434:11434"

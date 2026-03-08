@@ -134,7 +134,7 @@ async function generateAnswer(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model,
-        prompt: `Answer the following question using ONLY the provided context. If the context doesn't contain enough information, say so.\n\nContext:\n${truncatedContext}\n\nQuestion: ${question}\n\nAnswer:`,
+        prompt: `Answer the following question using ONLY the provided context. Use all relevant information the context contains. If a specific detail is not present, answer based on what is available.\n\nContext:\n${truncatedContext}\n\nQuestion: ${question}\n\nAnswer:`,
         stream: false,
         options: {
           temperature: 0.3,
@@ -255,7 +255,10 @@ export const POST: RequestHandler = async ({ request }) => {
           return results.slice(0, topK);
         }),
         safePipelineRun('fact', async () => {
-          let results = await searchFacts(query, { topK: topK * 2 });
+          // Facts are sentence-level and far more granular than chunks.
+          // A 4× pool gives vector search a better chance of surfacing facts
+          // that cover all sub-parts of the answer, not just the top-ranked sentence.
+          let results = await searchFacts(query, { topK: topK * 4 });
           if (shouldRerank) {
             results = await rerank(query, results, { topK, threshold: rerankThreshold });
           }
@@ -384,7 +387,20 @@ export const POST: RequestHandler = async ({ request }) => {
         ];
 
         for (const p of pipelines) {
-          const context = p.result.result.map((r, i) => `[${i + 1}] ${r.content}`).join('\n\n');
+          // For the fact pipeline, sort retrieved facts by (documentId, factIndex) before
+          // assembling context. Score-order interleaves facts from different documents,
+          // producing an incoherent mosaic. Grouping by document and sequential position
+          // creates coherent mini-passages that the LLM and judge can reason about.
+          const contextResults = p.name === 'fact'
+            ? [...p.result.result].sort((a, b) => {
+                if (a.documentId !== b.documentId) return a.documentId.localeCompare(b.documentId);
+                const ai = (a.metadata as Record<string, unknown>).factIndex as number ?? 0;
+                const bi = (b.metadata as Record<string, unknown>).factIndex as number ?? 0;
+                return ai - bi;
+              })
+            : p.result.result;
+
+          const context = contextResults.map((r, i) => `[${i + 1}] ${r.content}`).join('\n\n');
           const truncatedContext = context.length > MAX_CONTEXT_LENGTH
             ? context.slice(0, MAX_CONTEXT_LENGTH) + '\n...[truncated]'
             : context;

@@ -272,6 +272,7 @@ export async function initializeDatabase(): Promise<void> {
         judge_mean REAL NOT NULL,
         judge_std REAL NOT NULL,
         failure_type VARCHAR(30),
+        answerable_from_context BOOLEAN,
         judge_model TEXT NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
       )
@@ -282,6 +283,12 @@ export async function initializeDatabase(): Promise<void> {
     `;
     await client`
       CREATE INDEX IF NOT EXISTS rag_judge_failure_type_idx ON rag_judge_results(failure_type)
+    `;
+
+    // Migrate existing rag_judge_results: add answerable_from_context column if missing
+    await client`
+      ALTER TABLE rag_judge_results
+      ADD COLUMN IF NOT EXISTS answerable_from_context BOOLEAN
     `;
 
     // Create rag_preferences table
