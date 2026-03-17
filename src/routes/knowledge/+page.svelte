@@ -28,6 +28,10 @@
   let reindexResult = $state<{ reindexed: number; failed: number; totalDocuments: number } | null>(null);
   let reindexError = $state('');
 
+  // Nuke state
+  let nuking = $state(false);
+  let nukeError = $state('');
+
   // Filter state
   let pipelineFilter = $state<'all' | 'chunk' | 'fact' | 'llm'>('all');
   let searchQuery = $state('');
@@ -119,6 +123,29 @@
       console.error('Failed to load chunks:', e);
     } finally {
       loadingChunks = false;
+    }
+  }
+
+  async function nukeAll() {
+    if (!confirm('⚠️ NUKE ALL DATA?\n\nThis permanently deletes every document, chunk, fact, embedding, evaluation run, judge result, test query, and model. There is no undo.\n\nAre you absolutely sure?')) {
+      return;
+    }
+
+    nuking = true;
+    nukeError = '';
+    expandedDocId = null;
+    chunks = [];
+
+    try {
+      const res = await fetch('/api/nuke', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Nuke failed');
+      documents = [];
+      reindexResult = null;
+    } catch (e) {
+      nukeError = e instanceof Error ? e.message : 'Nuke failed';
+    } finally {
+      nuking = false;
     }
   }
 
@@ -220,18 +247,32 @@
         <h1>Knowledge Base</h1>
         <p class="subtitle">Browse documents and their chunks/facts/summaries</p>
       </div>
-      <button
-        class="btn btn-secondary reindex-btn"
-        onclick={reindexAll}
-        disabled={reindexing || loading}
-        title="Re-chunk and re-embed all documents using the current config (no web fetch)"
-      >
-        {#if reindexing}
-          <span class="spinner-small"></span> Reindexing…
-        {:else}
-          ↺ Reindex All
-        {/if}
-      </button>
+      <div class="header-actions">
+        <button
+          class="btn btn-danger nuke-btn"
+          onclick={nukeAll}
+          disabled={nuking || reindexing || loading}
+          title="Delete ALL data: documents, vectors, evaluations, judge results, test queries"
+        >
+          {#if nuking}
+            <span class="spinner-small"></span> Nuking…
+          {:else}
+            ☢ Nuke All
+          {/if}
+        </button>
+        <button
+          class="btn btn-secondary reindex-btn"
+          onclick={reindexAll}
+          disabled={reindexing || nuking || loading}
+          title="Re-chunk and re-embed all documents using the current config (no web fetch)"
+        >
+          {#if reindexing}
+            <span class="spinner-small"></span> Reindexing…
+          {:else}
+            ↺ Reindex All
+          {/if}
+        </button>
+      </div>
     </div>
 
     {#if reindexResult}
@@ -242,6 +283,9 @@
     {/if}
     {#if reindexError}
       <div class="reindex-result error">{reindexError}</div>
+    {/if}
+    {#if nukeError}
+      <div class="reindex-result error">{nukeError}</div>
     {/if}
   </header>
 
@@ -406,13 +450,39 @@
     flex-wrap: wrap;
   }
 
-  .reindex-btn {
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     flex-shrink: 0;
-    align-self: center;
+  }
+
+  .reindex-btn {
     display: flex;
     align-items: center;
     gap: 6px;
     white-space: nowrap;
+  }
+
+  .nuke-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    background: rgba(220, 53, 69, 0.15);
+    border-color: rgba(220, 53, 69, 0.5);
+    color: #dc3545;
+  }
+
+  .nuke-btn:hover:not(:disabled) {
+    background: rgba(220, 53, 69, 0.3);
+    border-color: #dc3545;
+    color: #ff6b7a;
+  }
+
+  .nuke-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .reindex-result {
