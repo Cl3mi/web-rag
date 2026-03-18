@@ -37,57 +37,69 @@ export const GET: RequestHandler = async ({ url }) => {
 };
 
 export const POST: RequestHandler = async ({ request }) => {
-  try {
-    const body = await request.json();
-    const { urls } = body;
+  const body = await request.json().catch(() => ({}));
+  const { urls } = body as { urls?: unknown[] };
 
-    if (!Array.isArray(urls) || urls.length === 0) {
-      return json({ error: 'urls array is required and must not be empty' }, { status: 400 });
-    }
-
-    // Validate all entries are strings
-    if (!urls.every((u) => typeof u === 'string')) {
-      return json({ error: 'All urls must be strings' }, { status: 400 });
-    }
-
-    const results = [];
-    let processed = 0;
-    let unchanged = 0;
-    let failed = 0;
-
-    for (const url of urls as string[]) {
-      console.log(`Ingesting: ${url}`);
-      const result = await ingestUrl(url);
-
-      if (result.status === 'processed') processed++;
-      else if (result.status === 'unchanged') unchanged++;
-      else failed++;
-
-      results.push({
-        url: result.url,
-        status: result.status,
-        title: result.title,
-        wordCount: result.wordCount,
-        chunkCount: result.chunk.chunkCount,
-        factCount: result.fact.factCount,
-        llmChunkCount: result.llm.chunkCount,
-        processingTimeMs: result.processingTimeMs,
-        error: result.error,
-      });
-    }
-
-    return json({
-      total: urls.length,
-      processed,
-      unchanged,
-      failed,
-      results,
-    });
-  } catch (error) {
-    console.error('Sitemap crawl error:', error);
-    return json(
-      { error: error instanceof Error ? error.message : 'Internal server error' },
-      { status: 500 }
-    );
+  if (!Array.isArray(urls) || urls.length === 0) {
+    return json({ error: 'urls array is required and must not be empty' }, { status: 400 });
   }
+  if (!urls.every((u) => typeof u === 'string')) {
+    return json({ error: 'All urls must be strings' }, { status: 400 });
+  }
+
+  const enc = new TextEncoder();
+
+  const stream = new ReadableStream({
+    async start(controller) {
+      const send = (data: object) => {
+        try {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch { /* client disconnected */ }
+      };
+
+      let processed = 0;
+      let unchanged = 0;
+      let failed = 0;
+
+      send({ type: 'start', total: urls.length });
+
+      for (const url of urls as string[]) {
+        console.log(`Ingesting: ${url}`);
+        try {
+          const result = await ingestUrl(url);
+
+          if (result.status === 'processed') processed++;
+          else if (result.status === 'unchanged') unchanged++;
+          else failed++;
+
+          send({
+            type: 'progress',
+            url: result.url,
+            status: result.status,
+            title: result.title,
+            wordCount: result.wordCount,
+            chunkCount: result.chunk.chunkCount,
+            factCount: result.fact.factCount,
+            llmChunkCount: result.llm.chunkCount,
+            processingTimeMs: result.processingTimeMs,
+            error: result.error,
+          });
+        } catch (e) {
+          failed++;
+          send({ type: 'progress', url, status: 'error', error: e instanceof Error ? e.message : 'Unknown error', chunkCount: 0, factCount: 0, llmChunkCount: 0 });
+        }
+      }
+
+      send({ type: 'done', total: urls.length, processed, unchanged, failed });
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    },
+  });
 };

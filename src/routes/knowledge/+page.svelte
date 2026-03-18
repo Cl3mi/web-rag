@@ -9,6 +9,9 @@
     metadata: Record<string, unknown>;
     createdAt: string;
     updatedAt: string;
+    chunkCount: number;
+    factCount: number;
+    llmCount: number;
   }
 
   interface Chunk {
@@ -24,9 +27,31 @@
   let error = $state('');
 
   // Reindex state
+  interface ReindexProgressItem {
+    url: string;
+    status: 'processed' | 'error';
+    chunkCount?: number;
+    chunkError?: string;
+    factCount?: number;
+    factError?: string;
+    llmCount?: number;
+    llmError?: string;
+    error?: string;
+  }
+
   let reindexing = $state(false);
   let reindexResult = $state<{ reindexed: number; failed: number; totalDocuments: number } | null>(null);
   let reindexError = $state('');
+  let reindexProgress = $state<ReindexProgressItem[]>([]);
+  let reindexDone = $state(0);
+  let reindexTotal = $state(0);
+  let reindexOllamaAvailable = $state<boolean | null>(null);
+
+  // Pipeline selection for reindex
+  let reindexPipelines = $state({ chunk: true, fact: true, llm: true });
+  let selectedPipelines = $derived.by(() =>
+    Object.entries(reindexPipelines).filter(([, v]) => v).map(([k]) => k)
+  );
 
   // Nuke state
   let nuking = $state(false);
@@ -74,11 +99,11 @@
     error = '';
 
     try {
-      const res = await fetch('/api/metrics');
+      const res = await fetch('/api/documents');
       if (!res.ok) throw new Error('Failed to load documents');
 
       const data = await res.json();
-      documents = data.recentDocuments || [];
+      documents = data.documents || [];
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to load documents';
     } finally {
@@ -150,14 +175,22 @@
   }
 
   async function reindexAll() {
-    if (!confirm(`Re-process all ${documents.length} documents with the current chunking config? This will delete and recreate all chunks/facts/summaries. The LLM pipeline may take several minutes.`)) {
+    if (selectedPipelines.length === 0) {
+      alert('Select at least one pipeline to reindex.');
+      return;
+    }
+    const pipelineLabel = selectedPipelines.join(', ');
+    if (!confirm(`Re-process all ${documents.length} documents through: ${pipelineLabel}.\n\nThis deletes and recreates the selected pipeline data.${reindexPipelines.llm ? '\n\nThe LLM pipeline may take several minutes.' : ''}`)) {
       return;
     }
 
     reindexing = true;
     reindexResult = null;
     reindexError = '';
-    // Close any expanded doc to avoid stale data
+    reindexProgress = [];
+    reindexDone = 0;
+    reindexTotal = 0;
+    reindexOllamaAvailable = null;
     expandedDocId = null;
     chunks = [];
 
@@ -165,11 +198,42 @@
       const res = await fetch('/api/reindex', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ pipelines: selectedPipelines }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Reindex failed');
-      reindexResult = data;
+      if (!res.ok || !res.body) throw new Error('Failed to start reindex');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() ?? '';
+
+        for (const block of blocks) {
+          const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+            if (event.type === 'start') {
+              reindexTotal = event.total;
+              reindexOllamaAvailable = event.ollamaAvailable;
+            } else if (event.type === 'progress') {
+              reindexProgress = [event, ...reindexProgress].slice(0, 100);
+              reindexDone++;
+            } else if (event.type === 'done') {
+              reindexResult = { reindexed: event.reindexed, failed: event.failed, totalDocuments: event.total };
+              loadDocuments(); // refresh counts in doc list
+            } else if (event.type === 'error') {
+              reindexError = event.error;
+            }
+          } catch { /* malformed event */ }
+        }
+      }
     } catch (e) {
       reindexError = e instanceof Error ? e.message : 'Reindex failed';
     } finally {
@@ -260,18 +324,44 @@
             ☢ Nuke All
           {/if}
         </button>
-        <button
-          class="btn btn-secondary reindex-btn"
-          onclick={reindexAll}
-          disabled={reindexing || nuking || loading}
-          title="Re-chunk and re-embed all documents using the current config (no web fetch)"
-        >
-          {#if reindexing}
-            <span class="spinner-small"></span> Reindexing…
-          {:else}
-            ↺ Reindex All
-          {/if}
-        </button>
+
+        <div class="reindex-bar">
+          <div class="pipeline-selector" title="Toggle pipelines to reindex">
+            <button
+              class="pipeline-pill chunk"
+              class:active={reindexPipelines.chunk}
+              onclick={() => (reindexPipelines.chunk = !reindexPipelines.chunk)}
+              disabled={reindexing}
+              title="Text chunks — hybrid BM25 + dense search"
+            >Chunk</button>
+            <button
+              class="pipeline-pill fact"
+              class:active={reindexPipelines.fact}
+              onclick={() => (reindexPipelines.fact = !reindexPipelines.fact)}
+              disabled={reindexing}
+              title="Atomic fact extraction"
+            >Fact</button>
+            <button
+              class="pipeline-pill llm"
+              class:active={reindexPipelines.llm}
+              onclick={() => (reindexPipelines.llm = !reindexPipelines.llm)}
+              disabled={reindexing}
+              title="Ollama LLM summaries"
+            >LLM</button>
+          </div>
+          <button
+            class="btn btn-secondary reindex-btn"
+            onclick={reindexAll}
+            disabled={reindexing || nuking || loading || selectedPipelines.length === 0}
+            title="Re-process all documents through selected pipelines (no web fetch)"
+          >
+            {#if reindexing}
+              <span class="spinner-small"></span> {reindexDone}/{reindexTotal}
+            {:else}
+              ↺ Reindex
+            {/if}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -286,6 +376,50 @@
     {/if}
     {#if nukeError}
       <div class="reindex-result error">{nukeError}</div>
+    {/if}
+
+    {#if reindexing || reindexProgress.length > 0}
+      <div class="reindex-live">
+        <div class="reindex-live-header">
+          {#if reindexing}
+            <span class="spinner-small"></span> Processing {reindexDone}/{reindexTotal}…
+          {:else}
+            ✓ Done — {reindexDone}/{reindexTotal} processed
+          {/if}
+          {#if reindexOllamaAvailable !== null}
+            <span class="ollama-badge" class:ok={reindexOllamaAvailable} class:fail={!reindexOllamaAvailable}>
+              Ollama {reindexOllamaAvailable ? '✓' : '✗ unreachable — LLM skipped'}
+            </span>
+          {/if}
+        </div>
+        {#if reindexProgress.length > 0}
+          <div class="reindex-log">
+            <table class="reindex-table">
+              <thead>
+                <tr><th>URL</th><th>Chunks</th><th>Facts</th><th>LLM</th></tr>
+              </thead>
+              <tbody>
+                {#each reindexProgress as item (item.url)}
+                  <tr class:row-error={item.status === 'error'}>
+                    <td class="log-url" title={item.url}>{item.url.replace(/^https?:\/\/[^/]+/, '').slice(-60) || item.url}</td>
+                    {#if item.status === 'error'}
+                      <td colspan="3" class="pipeline-err">{item.error}</td>
+                    {:else}
+                      <td class:pipeline-warn={item.chunkError}>{item.chunkError ? '⚠' : item.chunkCount}</td>
+                      <td class:pipeline-warn={item.factError}>{item.factError ? '⚠' : item.factCount}</td>
+                      <td
+                        class:pipeline-warn={item.llmError}
+                        class:pipeline-zero={!item.llmError && item.llmCount === 0}
+                        title={item.llmError ?? ''}
+                      >{item.llmError ? `⚠ ${item.llmError}` : item.llmCount}</td>
+                    {/if}
+                  </tr>
+                {/each}
+              </tbody>
+            </table>
+          </div>
+        {/if}
+      </div>
     {/if}
   </header>
 
@@ -371,6 +505,9 @@
               </div>
               <div class="doc-meta">
                 <span class="badge">{doc.domain}</span>
+                <span class="count-badge chunk" title="Text chunks">{doc.chunkCount ?? 0} ch</span>
+                <span class="count-badge fact" title="Facts">{doc.factCount ?? 0} fa</span>
+                <span class="count-badge llm" class:zero={!doc.llmCount} title="LLM summaries">{doc.llmCount ?? 0} llm</span>
               </div>
               <span
                 class="btn-delete"
@@ -456,6 +593,49 @@
     gap: 8px;
     flex-shrink: 0;
   }
+
+  .reindex-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .pipeline-selector {
+    display: flex;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .pipeline-pill {
+    padding: 7px 13px;
+    background: transparent;
+    border: none;
+    border-right: 1px solid #2a2a2a;
+    color: #444;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .pipeline-pill:last-child {
+    border-right: none;
+  }
+
+  .pipeline-pill:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .pipeline-pill.chunk.active  { color: #4da3ff; background: rgba(77, 163, 255, 0.12); }
+  .pipeline-pill.fact.active   { color: #28a745; background: rgba(40, 167, 69, 0.12); }
+  .pipeline-pill.llm.active    { color: #9b6dff; background: rgba(155, 109, 255, 0.12); }
+
+  .pipeline-pill.chunk:not(.active):not(:disabled):hover { color: #4da3ff88; }
+  .pipeline-pill.fact:not(.active):not(:disabled):hover  { color: #28a74588; }
+  .pipeline-pill.llm:not(.active):not(:disabled):hover   { color: #9b6dff88; }
 
   .reindex-btn {
     display: flex;
@@ -647,7 +827,12 @@
   }
 
   .doc-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     flex-shrink: 0;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .expand-icon {
@@ -729,6 +914,23 @@
     border-left-color: #28a745;
   }
 
+  .chunk-card.llm {
+    border-left-color: #9b6dff;
+  }
+
+  .count-badge {
+    font-size: 0.72rem;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .count-badge.chunk { background: rgba(77, 163, 255, 0.15); color: #4da3ff; }
+  .count-badge.fact  { background: rgba(40, 167, 69, 0.15);  color: #28a745; }
+  .count-badge.llm   { background: rgba(155, 109, 255, 0.15); color: #9b6dff; }
+  .count-badge.llm.zero { background: rgba(100, 100, 100, 0.15); color: #555; }
+
   .chunk-header {
     display: flex;
     align-items: center;
@@ -746,6 +948,96 @@
     color: #ccc;
     line-height: 1.6;
     white-space: pre-wrap;
+  }
+
+  /* Live reindex progress */
+  .reindex-live {
+    margin-top: 12px;
+    border: 1px solid #444;
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .reindex-live-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #222;
+    font-size: 0.85rem;
+    color: #ccc;
+    flex-wrap: wrap;
+  }
+
+  .ollama-badge {
+    font-size: 0.78rem;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-weight: 500;
+  }
+
+  .ollama-badge.ok {
+    background: rgba(40, 167, 69, 0.2);
+    color: #28a745;
+    border: 1px solid rgba(40, 167, 69, 0.4);
+  }
+
+  .ollama-badge.fail {
+    background: rgba(220, 53, 69, 0.2);
+    color: #dc3545;
+    border: 1px solid rgba(220, 53, 69, 0.4);
+  }
+
+  .reindex-log {
+    max-height: 280px;
+    overflow-y: auto;
+  }
+
+  .reindex-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.78rem;
+  }
+
+  .reindex-table th {
+    padding: 5px 10px;
+    color: #666;
+    font-weight: 500;
+    border-bottom: 1px solid #333;
+    text-align: left;
+    background: #1e1e1e;
+  }
+
+  .reindex-table td {
+    padding: 4px 10px;
+    border-bottom: 1px solid #2a2a2a;
+    color: #aaa;
+    white-space: nowrap;
+  }
+
+  .reindex-table .log-url {
+    color: #888;
+    max-width: 360px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .reindex-table .row-error td {
+    background: #1e1010;
+  }
+
+  .pipeline-err {
+    color: #dc3545;
+    font-size: 0.75rem;
+  }
+
+  .pipeline-warn {
+    color: #ffc107 !important;
+  }
+
+  .pipeline-zero {
+    color: #666 !important;
   }
 
   @media (max-width: 768px) {

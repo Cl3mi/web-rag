@@ -273,12 +273,48 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ urls: Array.from(selectedUrls) }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Crawl failed');
-      crawlResults = data.results;
-      crawlSummary = { total: data.total, processed: data.processed, unchanged: data.unchanged, failed: data.failed };
-      showToast('success', `Crawl done: ${data.processed} processed, ${data.unchanged} unchanged, ${data.failed} failed`);
-      await loadDocuments();
+      if (!res.ok || !res.body) throw new Error('Failed to start crawl');
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let processed = 0, unchanged = 0, failed = 0, total = 0;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split('\n\n');
+        buffer = blocks.pop() ?? '';
+
+        for (const block of blocks) {
+          const dataLine = block.split('\n').find((l) => l.startsWith('data: '));
+          if (!dataLine) continue;
+          try {
+            const event = JSON.parse(dataLine.slice(6));
+            if (event.type === 'start') {
+              total = event.total;
+              crawlSummary = { total, processed: 0, unchanged: 0, failed: 0 };
+            } else if (event.type === 'progress') {
+              if (event.status === 'processed') processed++;
+              else if (event.status === 'unchanged') unchanged++;
+              else failed++;
+              crawlSummary = { total, processed, unchanged, failed };
+              crawlResults = [...crawlResults, event];
+            } else if (event.type === 'done') {
+              crawlSummary = { total: event.total, processed: event.processed, unchanged: event.unchanged, failed: event.failed };
+              showToast('success', `Crawl done: ${event.processed} processed, ${event.unchanged} unchanged, ${event.failed} failed`);
+              await loadDocuments();
+            } else if (event.type === 'error') {
+              throw new Error(event.error);
+            }
+          } catch (parseErr) {
+            if (parseErr instanceof SyntaxError) continue;
+            throw parseErr;
+          }
+        }
+      }
     } catch (e) {
       sitemapError = e instanceof Error ? e.message : 'Crawl failed';
       showToast('error', sitemapError);
@@ -506,7 +542,7 @@
         >
           {#if isCrawling}
             <span class="spinner-small"></span>
-            Crawling...
+            Crawling {crawlResults.length}/{crawlSummary?.total ?? selectedUrls.size}…
           {:else}
             Crawl {selectedUrls.size} selected
           {/if}
@@ -533,6 +569,7 @@
               <th>Status</th>
               <th>Chunks</th>
               <th>Facts</th>
+              <th>LLM</th>
             </tr>
           </thead>
           <tbody>
@@ -547,8 +584,11 @@
                     {r.status}
                   </span>
                 </td>
-                <td>{r.chunkCount}</td>
-                <td>{r.factCount}</td>
+                <td>{r.chunkCount ?? '-'}</td>
+                <td>{r.factCount ?? '-'}</td>
+                <td class:llm-zero={r.llmChunkCount === 0 && r.status === 'processed'}>
+                  {r.llmChunkCount ?? '-'}
+                </td>
               </tr>
             {/each}
           </tbody>
@@ -1034,6 +1074,10 @@
 
   .result-row-error td {
     background: #2a1a1a;
+  }
+
+  .llm-zero {
+    color: #666;
   }
 
   @media (max-width: 768px) {
