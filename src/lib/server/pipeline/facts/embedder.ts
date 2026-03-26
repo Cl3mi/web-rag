@@ -2,7 +2,15 @@
  * Facts Pipeline Embedder
  *
  * Generates dense + sparse embeddings for atomic facts.
- * Sparse (BM25-style) is computed from sourceContext (±1 surrounding sentences)
+ *
+ * Contextual Retrieval (Anthropic 2024):
+ *   Dense embedding target = "[{heading}] {content}" when a section heading is known.
+ *   This bakes document structure into the vector so that queries using different
+ *   terminology from the fact's text (e.g. "student products" vs "U27 Fonds-Sparplan")
+ *   can still match via the heading context. The stored content stays as the bare
+ *   atomic sentence — only the embedding vector is enriched.
+ *
+ * Sparse (BM25-style) is computed from sourceContext (heading + ±1 surrounding sentences)
  * to give keyword matching a richer signal than the bare fact sentence alone.
  */
 
@@ -16,17 +24,27 @@ export interface FactWithEmbedding extends ExtractedFact {
 }
 
 /**
+ * Build the text used for dense embedding (Contextual Retrieval pattern).
+ * Prepends the section heading when available so that terminology mismatches
+ * (e.g. "student" vs "U27") are bridged at the vector level.
+ * The stored fact.content is never modified — only the embedding target changes.
+ */
+function denseEmbeddingText(fact: ExtractedFact): string {
+  return fact.metadata.heading
+    ? `[${fact.metadata.heading}] ${fact.content}`
+    : fact.content;
+}
+
+/**
  * Embed a single fact
  */
 export async function embedFact(
   fact: ExtractedFact,
   factIndex: number
 ): Promise<FactWithEmbedding> {
-  // Dense embedding on the atomic fact sentence — precise, topic-specific signal.
-  // Sparse embedding on sourceContext (±1 surrounding sentence) — richer vocabulary
-  // for BM25 keyword matching. Keeping them on different spans is intentional:
-  // dense finds semantically similar facts, sparse re-ranks by keyword overlap.
-  const embedding = await embedDense(fact.content);
+  // Dense: contextual embedding target "[heading] sentence" when heading known.
+  // Sparse: sourceContext (heading + ±1 surrounding sentence) for BM25 keyword matching.
+  const embedding = await embedDense(denseEmbeddingText(fact));
 
   return {
     ...fact,
@@ -42,8 +60,8 @@ export async function embedFact(
 export async function embedFacts(facts: ExtractedFact[]): Promise<FactWithEmbedding[]> {
   if (facts.length === 0) return [];
 
-  // Dense on atomic fact sentence; sparse on sourceContext. See embedFact().
-  const texts = facts.map((fact) => fact.content);
+  // Dense: contextual "[heading] sentence" per fact. Sparse: sourceContext.
+  const texts = facts.map(denseEmbeddingText);
   const embeddings = await embedBatchDense(texts);
 
   return facts.map((fact, i) => ({

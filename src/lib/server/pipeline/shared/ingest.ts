@@ -137,7 +137,7 @@ export async function ingestUrl(url: string): Promise<IngestResult> {
 
     const [chunkResult, factResult] = await Promise.all([
       processChunkPipeline(documentId, chunks),
-      processFactPipeline(documentId, extracted.textContent),
+      processFactPipeline(documentId, extracted.markdownContent),
     ]);
 
     const ollamaAvailable = await checkOllamaAvailable();

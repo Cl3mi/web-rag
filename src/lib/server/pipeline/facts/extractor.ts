@@ -26,6 +26,11 @@ export interface ExtractedFact {
     extractedFrom?: string;
     entities?: string[];
     relations?: string[];
+    codeBlock?: string;
+    language?: string;
+    /** Nearest section heading above this fact. Used to enrich the dense embedding
+     *  target so that contextual retrieval works without LLM calls. */
+    heading?: string;
   };
 }
 
@@ -54,23 +59,37 @@ const categoryKeywords: Record<FactCategory, string[]> = {
     'limit', 'maximum', 'minimum', 'default', 'configuration', 'setting',
     'requirement', 'specification', 'standard', 'format', 'type', 'unit',
     'measure', 'metric', 'kb', 'mb', 'gb', 'ms', 'seconds', 'minutes',
+    // German
+    'maximal', 'minimal', 'bis zu', 'mindestens', 'größe', 'anzahl',
+    'kapazität', 'speicher', 'zeitlimit', 'frist',
   ],
   PROC: [
     'step', 'first', 'then', 'next', 'finally', 'process', 'procedure',
     'method', 'approach', 'how to', 'install', 'configure', 'setup',
     'create', 'build', 'run', 'execute', 'deploy', 'start', 'stop',
     'click', 'select', 'enter', 'press', 'navigate', 'open', 'close',
+    // German
+    'schritt', 'zuerst', 'dann', 'anschließend', 'danach', 'klicken',
+    'wählen', 'eingeben', 'öffnen', 'starten', 'beenden', 'installieren',
+    'konfigurieren', 'erstellen', 'ausführen', 'navigieren', 'auswählen',
   ],
   DEF: [
     'is', 'are', 'means', 'refers to', 'defined as', 'known as',
     'represents', 'describes', 'indicates', 'denotes', 'consists of',
     'comprises', 'includes', 'contains', 'explanation', 'concept',
+    // German
+    'ist ein', 'ist eine', 'sind', 'bedeutet', 'bezeichnet', 'umfasst',
+    'beinhaltet', 'besteht aus', 'ermöglicht', 'erlaubt', 'definiert als',
   ],
   REL: [
     'compared to', 'versus', 'vs', 'similar to', 'different from',
     'related to', 'depends on', 'requires', 'uses', 'based on',
     'derived from', 'extends', 'implements', 'inherits', 'connects',
     'integrates', 'links', 'associated', 'connected',
+    // German
+    'verglichen mit', 'im vergleich zu', 'basiert auf', 'verwendet',
+    'benötigt', 'integriert', 'verbunden mit', 'abhängig von', 'erfordert',
+    'unterstützt',
   ],
   OTHER: [],
 };
@@ -94,8 +113,8 @@ export function extractFacts(
   options: FactExtractionOptions = {}
 ): ExtractedFact[] {
   const {
-    minConfidence = 0.5,
-    maxFacts = 100,
+    minConfidence = 0.45,
+    maxFacts = 200,
     includeContext = true,
   } = options;
 
@@ -106,6 +125,32 @@ export function extractFacts(
     .replace(/\r\n/g, '\n')
     .replace(/\t/g, ' ')
     .trim();
+
+  // Strip markdown formatting markers so they don't leak into fact content.
+  // extractHeadings() already ran on the original text, so heading structure is captured.
+  // These replacements run before whitespace collapse so line-anchored patterns work.
+  cleanText = cleanText
+    // Heading markers: "# Title" → "Title." — appending a period forces the
+    // sentence tokenizer to treat each heading as a sentence boundary, preventing
+    // heading text from merging with the following paragraph after whitespace
+    // collapse (e.g. "U27 Fondssparen Mit dem Fonds-Sparplan..." as one sentence).
+    // If the heading already ends with a period, the \.? group strips it first
+    // so we never produce double periods.
+    .replace(/^#{1,6}\s+(.+?)\.?\s*$/gm, '$1.')
+    // Bold/italic: **text** / *text* / __text__ / _text_ → text
+    .replace(/\*{1,2}([^*\n]+)\*{1,2}/g, '$1')
+    .replace(/_{1,2}([^_\n]+)_{1,2}/g, '$1')
+    // Links: [text](url) → text
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    // Markdown table separator rows: | --- | --- | (no useful content)
+    .replace(/^\|[\s|:-]+\|$/gm, '')
+    // Horizontal rules
+    .replace(/^[-*_]{3,}\s*$/gm, '')
+    // List item markers: "- item" / "* item" / "+ item" → "item"
+    // extractListFacts() processes the original text for proper list context;
+    // stripping markers here prevents the tokenizer from producing garbled
+    // sentences like "- Bis zu 200 Website-Seiten." or "Features - A - B".
+    .replace(/^[-*+]\s+/gm, '');
 
   // Pre-process: replace checkmark/bullet separators used in pricing/feature lists
   // e.g. "✓ Starter ✓ Pro ✓ Premium" → "Starter. Pro. Premium"
@@ -131,6 +176,46 @@ export function extractFacts(
   // Restore the placeholder back to a period in each sentence
   const sentences = rawSentences.map((s) => s.replace(new RegExp(GERMAN_DATE_PLACEHOLDER, 'g'), '.'));
 
+  // Build heading map: for each sentence index, the nearest preceding heading in the
+  // original text. Used to prepend section context to sourceContext so that sentences
+  // like "Bis zu 200 Website-Seiten." get "[Starter-Plan] ..." prepended.
+  const headings = extractHeadings(text);
+  const headingMap = new Map<number, string>();
+  if (headings.length > 0) {
+    for (let i = 0; i < sentences.length; i++) {
+      // Find approximate position of this sentence in the original text.
+      // Strategy: take the first 5 words as a probe instead of a 30-char slice.
+      // After whitespace collapse, a sentence can span what were originally multiple
+      // lines (e.g. a stripped heading merged with the following body text by \s+ → ' ').
+      // A 30-char slice of such a merged sentence will NOT be found verbatim in the
+      // original text (which still has \n\n between the lines), so indexOf returns -1.
+      // The first N words almost always stay within a single original line and are
+      // reliably locatable in the structured markdown.
+      const firstWords = sentences[i]
+        .replace(/^[#\s*+\-]+/, '')   // strip leading markup chars
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 5)
+        .join(' ');
+      if (firstWords.length < 5) continue;
+      const sentencePos = text.indexOf(firstWords);
+      if (sentencePos < 0) continue;
+      // Walk headings in order (they are already sorted by index) to find the last
+      // heading whose character position precedes this sentence.
+      let nearestHeading = '';
+      for (const h of headings) {
+        if (h.index <= sentencePos) {
+          nearestHeading = h.text;
+        } else {
+          break;
+        }
+      }
+      if (nearestHeading) {
+        headingMap.set(i, nearestHeading);
+      }
+    }
+  }
+
   // Process each sentence
   for (let i = 0; i < sentences.length && facts.length < maxFacts; i++) {
     const sentence = sentences[i].trim();
@@ -138,8 +223,10 @@ export function extractFacts(
     // Skip non-factual content
     if (isNonFactual(sentence)) continue;
 
-    // Skip very short or very long sentences
-    if (sentence.length < 20 || sentence.length > 500) continue;
+    // Skip very short or very long sentences.
+    // 10-char minimum captures short structured data (office hours, contact details)
+    // that 20-char minimum was silently discarding.
+    if (sentence.length < 10 || sentence.length > 500) continue;
 
     // Extract entities and keywords
     const entities = extractEntities(sentence);
@@ -152,17 +239,25 @@ export function extractFacts(
         ? getContext(sentences, i)
         : sentence;
 
+      // Prepend the nearest section heading so retrieval gets topical context even
+      // when ±1 sentence context is insufficient (e.g. feature list items).
+      const heading = headingMap.get(i);
+      const sourceContext = heading ? `[${heading}] ${context}` : context;
+
       // Store the raw sentence as content — pronoun "resolution" via makeStandalone
       // corrupts embeddings (it replaces pronouns with the first capitalized noun it
       // finds, which is usually wrong and lowers cosine similarity to real queries).
+      // heading is stored in metadata so the embedder can prepend it to the dense
+      // embedding target (Contextual Retrieval pattern) without touching content.
       facts.push({
         content: sentence,
         category,
         confidence,
-        sourceContext: context,
+        sourceContext,
         metadata: {
           extractedFrom: sentence,
           entities: entities.length > 0 ? entities : undefined,
+          heading: heading || undefined,
         },
       });
     }
@@ -183,7 +278,32 @@ export function extractFacts(
   const codeFacts = extractCodeFacts(text, minConfidence, maxFacts - facts.length);
   facts.push(...codeFacts);
 
-  return facts.slice(0, maxFacts);
+  // Deduplication: list items and the sentence tokenizer both process bullet content
+  // (bullets are converted to ". " before tokenization AND matched by the list regex),
+  // producing near-duplicate facts with different sourceContext. Keep first occurrence.
+  const totalBeforeDedup = facts.length;
+  const seen = new Set<string>();
+  const deduplicated = facts.filter((fact) => {
+    const normalized = fact.content
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[.,;:!?]+$/, '')
+      .trim();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+
+  // Debug log — only when RAG_DEBUG=true, so production logs stay clean
+  if (process.env.RAG_DEBUG === 'true') {
+    const afterConf = deduplicated.filter((f) => f.confidence >= minConfidence).length;
+    console.debug(
+      `[extractFacts] sentences=${sentences.length}, facts_before_dedup=${totalBeforeDedup}, ` +
+      `facts_after_dedup=${deduplicated.length}, facts_after_confidence=${afterConf}`
+    );
+  }
+
+  return deduplicated.slice(0, maxFacts);
 }
 
 /**
@@ -412,8 +532,8 @@ function extractListFacts(
   while ((match = listPattern.exec(text)) !== null && facts.length < maxFacts) {
     const item = match[1].trim();
 
-    // Skip very short items
-    if (item.length < 15) continue;
+    // Skip very short items (10 chars allows short structured values with heading context)
+    if (item.length < 10) continue;
 
     const entities = extractEntities(item);
     const category = classifyFact(item);
@@ -429,9 +549,15 @@ function extractListFacts(
         (l) => l.trim() && !/^[\s]*[-*•\d+\.]\s+/.test(l)
       );
       const precedingLine = precedingLines.length > 0
-        ? precedingLines[precedingLines.length - 1].trim()
+        // Strip markdown heading markers so "[## Preisübersicht]" doesn't appear in sourceContext
+        ? precedingLines[precedingLines.length - 1].trim().replace(/^#{1,6}\s+/, '')
         : '';
-      const sourceContext = precedingLine ? `${precedingLine} ${item}` : item;
+      const looksLikeHeading = precedingLine.length > 0 && precedingLine.length < 80 && !precedingLine.endsWith('.');
+      const sourceContext = precedingLine
+        ? looksLikeHeading
+          ? `[${precedingLine}] ${item}`
+          : `${precedingLine} ${item}`
+        : item;
 
       facts.push({
         content: item,
@@ -441,6 +567,7 @@ function extractListFacts(
         metadata: {
           extractedFrom: `List item: ${item}`,
           entities: entities.length > 0 ? entities : undefined,
+          heading: looksLikeHeading ? precedingLine : undefined,
         },
       });
     }
@@ -450,7 +577,50 @@ function extractListFacts(
 }
 
 /**
- * Extract facts from code blocks
+ * Extract headings from text for heading-inheritance in sourceContext.
+ * Returns headings in document order with their character positions in text.
+ *
+ * Only detects REAL Markdown headings (^#{1,6}\s+) — the previous heuristic
+ * that matched any short line bordered by blank lines caused false positives:
+ * body sentences like "ab € 50,- Veranlagungsbetrag pro Monat" and bold lines
+ * like "**Veranlagungen in Finanzinstrumente bergen Risiken.**" were detected
+ * as headings, shifting dense embeddings into incorrect topic regions and
+ * causing completely wrong documents to rank first in retrieval.
+ */
+function extractHeadings(text: string): Array<{index: number, text: string}> {
+  const headings: Array<{index: number, text: string}> = [];
+  const lines = text.split('\n');
+  let charIndex = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Markdown headings only: lines starting with one or more '#' characters.
+    // Turndown converts <h1>–<h6> HTML elements to ATX-style headings, so these
+    // reliably reflect the page's actual section structure.
+    const mdMatch = trimmed.match(/^#{1,6}\s+(.+)/);
+    if (mdMatch) {
+      // Strip any inline bold/italic markers from the heading text so stored
+      // headings are clean: "## **U27** Fondssparen" → "U27 Fondssparen"
+      const headingText = mdMatch[1].trim()
+        .replace(/\*{1,2}([^*]+)\*{1,2}/g, '$1')
+        .replace(/_{1,2}([^_]+)_{1,2}/g, '$1');
+      headings.push({ index: charIndex, text: headingText });
+    }
+
+    charIndex += line.length + 1; // +1 for the '\n'
+  }
+
+  return headings;
+}
+
+/**
+ * Extract facts from code blocks.
+ * Rather than embedding raw code (nobody queries "code example in typescript"),
+ * we extract the last descriptive line BEFORE each code block — that heading or
+ * description is the actual retrievable claim. The code is stored in metadata so
+ * the LLM can still render it during generation.
  */
 function extractCodeFacts(
   text: string,
@@ -459,29 +629,40 @@ function extractCodeFacts(
 ): ExtractedFact[] {
   const facts: ExtractedFact[] = [];
 
-  // Find code blocks
-  const codeBlockPattern = /```(\w+)?\n([\s\S]*?)```/g;
+  const codeBlockPattern = /```(\w*)?\n([\s\S]*?)```/g;
   let match;
 
   while ((match = codeBlockPattern.exec(text)) !== null && facts.length < maxFacts) {
-    const language = match[1] || 'code';
+    const language = match[1] || undefined;
     const code = match[2].trim();
 
-    // Skip very short code blocks
     if (code.length < 20) continue;
 
-    // Create a fact about the code example
-    const factContent = `Code example in ${language}: ${code.slice(0, 100)}${code.length > 100 ? '...' : ''}`;
+    // Find the last non-empty, non-list line before this code block
+    const textBefore = text.slice(0, match.index);
+    const precedingLines = textBefore.split('\n').filter(
+      (l) => l.trim() && !/^[\s]*[-*•\d+\.]\s/.test(l)
+    );
+    if (precedingLines.length === 0) continue;
 
-    facts.push({
-      content: factContent,
-      category: 'SPEC',
-      confidence: 0.7,
-      sourceContext: code,
-      metadata: {
-        extractedFrom: `Code block (${language})`,
-      },
-    });
+    const precedingLine = precedingLines[precedingLines.length - 1].trim()
+      .replace(/^#+\s*/, ''); // strip markdown heading markers
+
+    if (precedingLine.length < 15) continue;
+
+    if (0.75 >= minConfidence && facts.length < maxFacts) {
+      facts.push({
+        content: precedingLine,
+        category: 'PROC',
+        confidence: 0.75,
+        sourceContext: `${precedingLine}\n${code.slice(0, 200)}`,
+        metadata: {
+          extractedFrom: precedingLine,
+          codeBlock: code,
+          language,
+        },
+      });
+    }
   }
 
   return facts;

@@ -89,9 +89,9 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // Build prompt with context
     const contextText = context.map((c, i) => `[${i + 1}] ${c}`).join('\n\n');
-    const systemPrompt = `You are a helpful assistant that answers questions based on the provided context. Use the context to answer the user's question accurately and concisely. If the context doesn't contain enough information to fully answer the question, say so.
+    const systemPrompt = ` You are a helpful assistant that answers questions thoroughly and in detail based on the provided context. Give complete, well-structured answers. Use markdown formatting where appropriate (headings, bullet points, code blocks). Only state that information is missing if the context genuinely does not contain it.
 
-Context:
+    Context:
 ${contextText}`;
 
     const generationStart = performance.now();

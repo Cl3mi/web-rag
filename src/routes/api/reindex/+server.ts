@@ -104,7 +104,7 @@ export const POST: RequestHandler = async ({ request }) => {
             // --- Fact pipeline ---
             if (shouldFact) {
               try {
-                const facts = extractFacts(extracted.textContent, { minConfidence: 0.3 });
+                const facts = extractFacts(extracted.markdownContent, { minConfidence: 0.3 });
                 if (facts.length > 0) {
                   const embedded = await embedFacts(facts);
                   for (const fact of embedded) {
