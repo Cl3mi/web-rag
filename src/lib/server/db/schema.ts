@@ -24,7 +24,7 @@ import {
   uniqueIndex,
 } from 'drizzle-orm/pg-core';
 import { sql } from 'drizzle-orm';
-import { EMBEDDING_DIMENSION } from '$lib/config/database';
+import { EMBEDDING_DIMENSION } from '../../config/database';
 
 // Custom vector type for pgvector
 const vector = (name: string, dimensions: number) =>

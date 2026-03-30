@@ -9,7 +9,7 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { sql } from '$lib/server/db/client';
+import { sql, ensureVectorColumn } from '$lib/server/db/client';
 
 export const POST: RequestHandler = async () => {
   try {
@@ -32,6 +32,14 @@ export const POST: RequestHandler = async () => {
     await sql`DELETE FROM documents`;
     await sql`DELETE FROM test_queries`;
     await sql`DELETE FROM rag_models`;
+
+    // After nuke, tables are empty — safe to realign vector column dimensions.
+    // This handles provider switches (e.g. local→openai) without a server restart.
+    await Promise.all([
+      ensureVectorColumn('traditional_chunks'),
+      ensureVectorColumn('facts_chunks'),
+      ensureVectorColumn('llm_chunks'),
+    ]);
 
     return json({ ok: true });
   } catch (error) {

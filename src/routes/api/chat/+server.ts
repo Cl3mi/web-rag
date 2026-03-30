@@ -10,17 +10,7 @@ import type { RequestHandler } from './$types';
 import { hybridSearch } from '$lib/server/pipeline/traditional/retriever';
 import { searchFacts } from '$lib/server/pipeline/facts/retriever';
 import { searchLLMChunks } from '$lib/server/pipeline/llm/retriever';
-import { env } from '$env/dynamic/private';
-
-const OLLAMA_BASE_URL = env.OLLAMA_URL || 'http://localhost:11434';
-const DEFAULT_MODEL = env.OLLAMA_MODEL || 'llama3.2';
-
-interface OllamaResponse {
-  model: string;
-  created_at: string;
-  response: string;
-  done: boolean;
-}
+import { generate, listModels, DEFAULT_MODEL, LLMError } from '$lib/server/llm/client';
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
@@ -96,56 +86,37 @@ ${contextText}`;
 
     const generationStart = performance.now();
 
-    // Call Ollama API
-    const ollamaResponse = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    let response: string;
+    try {
+      response = await generate({
         model,
         prompt: message,
-        system: systemPrompt,
-        stream: false,
-        options: {
-          temperature: 0.7, // higher=more creative / lower=more logical
-          top_p: 0.9, // vocabulary diversity | higher=wider range of words to choose from
-          num_predict: 1024, // maximum answer length (in token)
-        },
-      }),
-    });
-
-    if (!ollamaResponse.ok) {
-      const errorText = await ollamaResponse.text();
-      console.error('Ollama error:', errorText);
-      return json(
-        { error: `Ollama error: ${ollamaResponse.status}. Make sure Ollama is running with the model "${model}".` },
-        { status: 502 }
-      );
+        systemPrompt,
+        temperature: 0.7,
+        topP: 0.9,
+        maxTokens: 1024,
+      });
+    } catch (error) {
+      if (error instanceof LLMError) {
+        return json({ error: `LLM provider error (${error.status})` }, { status: 502 });
+      }
+      return json({ error: 'Cannot connect to LLM provider' }, { status: 502 });
     }
 
-    const ollamaData: OllamaResponse = await ollamaResponse.json();
     const generationTime = performance.now() - generationStart;
     const totalTime = performance.now() - startTime;
 
     return json({
-      response: ollamaData.response,
+      response,
       sources,
       pipeline,
-      model: ollamaData.model,
+      model,
       latencyMs: Math.round(totalTime),
       retrievalTimeMs: Math.round(retrievalTime),
       generationTimeMs: Math.round(generationTime),
     });
   } catch (error) {
     console.error('Chat error:', error);
-
-    // Check if it's a connection error to Ollama
-    if (error instanceof Error && error.message.includes('fetch')) {
-      return json(
-        { error: 'Cannot connect to Ollama. Make sure Ollama is running on localhost:11434.' },
-        { status: 502 }
-      );
-    }
-
     return json(
       { error: error instanceof Error ? error.message : 'Internal server error' },
       { status: 500 }
@@ -158,19 +129,6 @@ ${contextText}`;
  * List available Ollama models
  */
 export const GET: RequestHandler = async () => {
-  try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
-
-    if (!response.ok) {
-      return json({ models: [], error: 'Cannot connect to Ollama' });
-    }
-
-    const data = await response.json();
-    const models = (data.models || []).map((m: { name: string }) => m.name);
-
-    return json({ models, defaultModel: DEFAULT_MODEL });
-  } catch (error) {
-    console.error('List models error:', error);
-    return json({ models: [], error: 'Cannot connect to Ollama' });
-  }
+  const models = await listModels();
+  return json({ models, defaultModel: DEFAULT_MODEL });
 };

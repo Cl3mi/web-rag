@@ -4,8 +4,15 @@
 
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { getDatabaseUrl, databaseConfig } from '$lib/config/database';
+import { env } from '$env/dynamic/private';
+import { getDatabaseUrl, databaseConfig, EMBEDDING_DIMENSION as EMBEDDING_DIMENSION_STATIC } from '$lib/config/database';
 import * as schema from './schema';
+
+// Read dimension at runtime via SvelteKit env (process.env is not populated by Vite in this setup)
+const EMBEDDING_DIMENSION = (() => {
+  const fromEnv = parseInt(env.EMBEDDING_DIMENSION || '', 10);
+  return isNaN(fromEnv) ? EMBEDDING_DIMENSION_STATIC : fromEnv;
+})();
 
 // Create postgres client
 const connectionString = getDatabaseUrl();
@@ -31,6 +38,77 @@ export async function checkConnection(): Promise<boolean> {
     console.error('Database connection failed:', error);
     return false;
   }
+}
+
+/**
+ * Ensure a table's dense_embedding column is the correct vector type.
+ * db:push creates it as `text` (the Drizzle schema uses a text-based vector helper).
+ * This migrates it to vector(N) so HNSW indexes and <=> operators work.
+ *
+ * When existing data is present, the actual stored dimension is used (not EMBEDDING_DIMENSION)
+ * so that the column type matches the data. A warning is logged if they differ — the user
+ * must nuke + reindex to realign the dimension.
+ */
+export async function ensureVectorColumn(tableName: string): Promise<void> {
+  const colInfo = await client`
+    SELECT data_type, udt_name
+    FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = ${tableName} AND column_name = 'dense_embedding'
+  `;
+  if (colInfo.length === 0) return;
+
+  const isText = colInfo[0].data_type === 'text';
+
+  // If it's already the right vector type, nothing to do
+  if (!isText) {
+    // Check if the existing vector dimension matches EMBEDDING_DIMENSION.
+    // If the table is empty we can safely re-type it (e.g. provider switch after nuke).
+    const currentDim = await client.unsafe(
+      `SELECT atttypmod AS dim FROM pg_attribute pa
+       JOIN pg_class pc ON pa.attrelid = pc.oid
+       WHERE pc.relname = '${tableName}' AND pa.attname = 'dense_embedding' AND pa.atttypmod > 0`
+    );
+    if (currentDim.length > 0) {
+      const dim = Number(currentDim[0].dim);
+      if (dim !== EMBEDDING_DIMENSION) {
+        const countRows = await client.unsafe(`SELECT COUNT(*) AS n FROM "${tableName}"`);
+        if (Number(countRows[0].n) === 0) {
+          // Table is empty — safe to change dimension (provider switch)
+          await client.unsafe(
+            `ALTER TABLE "${tableName}" ALTER COLUMN dense_embedding TYPE vector(${EMBEDDING_DIMENSION})`
+          );
+          console.log(`Updated ${tableName}.dense_embedding: vector(${dim}) → vector(${EMBEDDING_DIMENSION})`);
+        } else {
+          console.warn(
+            `${tableName}.dense_embedding is vector(${dim}) but EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION}. ` +
+            `Nuke + reindex to complete the provider switch.`
+          );
+        }
+      }
+    }
+    return;
+  }
+
+  // Column is text — determine actual stored dimension (or fall back to config)
+  const sampleRow = await client.unsafe(
+    `SELECT array_length(string_to_array(trim(both '[]' from dense_embedding::text), ','), 1) AS dims
+     FROM "${tableName}" WHERE dense_embedding IS NOT NULL LIMIT 1`
+  );
+  const dim: number = sampleRow.length > 0 && sampleRow[0].dims != null
+    ? Number(sampleRow[0].dims)
+    : EMBEDDING_DIMENSION;
+
+  if (dim !== EMBEDDING_DIMENSION) {
+    console.warn(
+      `${tableName}.dense_embedding has ${dim}-dim data but EMBEDDING_DIMENSION=${EMBEDDING_DIMENSION}. ` +
+      `Converting column to vector(${dim}) to match stored data. Nuke + reindex to switch providers.`
+    );
+  }
+
+  await client.unsafe(
+    `ALTER TABLE "${tableName}" ALTER COLUMN dense_embedding TYPE vector(${dim}) USING dense_embedding::vector`
+  );
+  console.log(`Migrated ${tableName}.dense_embedding: text → vector(${dim})`);
 }
 
 // Initialize pgvector extension and create HNSW indexes
@@ -67,19 +145,22 @@ export async function initializeDatabase(): Promise<void> {
     `;
 
     // Create traditional_chunks table with vector column
-    await client`
+    await client.unsafe(`
       CREATE TABLE IF NOT EXISTS traditional_chunks (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         chunk_index INTEGER NOT NULL,
         content TEXT NOT NULL,
         content_markdown TEXT NOT NULL,
-        dense_embedding vector(1024),
+        dense_embedding vector(${EMBEDDING_DIMENSION}),
         sparse_vector JSONB DEFAULT '{}',
         metadata JSONB NOT NULL,
         created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
       )
-    `;
+    `);
+
+    // Ensure vector column type is correct (db:push creates it as text)
+    await ensureVectorColumn('traditional_chunks');
 
     // Create indexes for traditional_chunks
     await client`
@@ -98,7 +179,7 @@ export async function initializeDatabase(): Promise<void> {
     `;
 
     // Create facts_chunks table with vector column
-    await client`
+    await client.unsafe(`
       CREATE TABLE IF NOT EXISTS facts_chunks (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -106,12 +187,20 @@ export async function initializeDatabase(): Promise<void> {
         content TEXT NOT NULL,
         category VARCHAR(20) NOT NULL,
         confidence REAL DEFAULT 1.0 NOT NULL,
-        dense_embedding vector(1024),
+        dense_embedding vector(${EMBEDDING_DIMENSION}),
         source_context TEXT,
         metadata JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
       )
+    `);
+
+    // Ensure facts_chunks has sparse_vector column (added in later schema version)
+    await client`
+      ALTER TABLE facts_chunks ADD COLUMN IF NOT EXISTS sparse_vector JSONB DEFAULT '{}'
     `;
+
+    // Ensure vector column type is correct (db:push creates it as text)
+    await ensureVectorColumn('facts_chunks');
 
     // Create indexes for facts_chunks
     await client`
@@ -133,18 +222,27 @@ export async function initializeDatabase(): Promise<void> {
     `;
 
     // Create llm_chunks table - chunks with LLM-generated summaries
-    await client`
+    await client.unsafe(`
       CREATE TABLE IF NOT EXISTS llm_chunks (
         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
         chunk_index INTEGER NOT NULL,
         original_content TEXT NOT NULL,
         summary TEXT NOT NULL,
-        dense_embedding vector(1024),
+        dense_embedding vector(${EMBEDDING_DIMENSION}),
+        sparse_vector JSONB DEFAULT '{}',
         metadata JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
       )
+    `);
+
+    // Ensure llm_chunks has sparse_vector column (added in later schema version)
+    await client`
+      ALTER TABLE llm_chunks ADD COLUMN IF NOT EXISTS sparse_vector JSONB DEFAULT '{}'
     `;
+
+    // Ensure vector column type is correct (db:push creates it as text)
+    await ensureVectorColumn('llm_chunks');
 
     // Create indexes for llm_chunks
     await client`

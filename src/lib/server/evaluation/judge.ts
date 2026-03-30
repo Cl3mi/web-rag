@@ -8,7 +8,6 @@
  */
 
 import { sql } from '$lib/server/db/client';
-import { env } from '$env/dynamic/private';
 import type { JudgeScores, FailureType } from '$lib/types';
 
 // Patterns deliberately conservative: each one requires BOTH a negative/inability marker
@@ -43,8 +42,7 @@ function isRefusalAnswer(answer: string): boolean {
   return REFUSAL_PATTERNS.some(p => p.test(answer));
 }
 
-const OLLAMA_BASE_URL = env.OLLAMA_URL || 'http://localhost:11434';
-const DEFAULT_JUDGE_MODEL = env.OLLAMA_JUDGE_MODEL || env.OLLAMA_MODEL || 'llama3.2';
+import { generate, DEFAULT_JUDGE_MODEL } from '$lib/server/llm/client';
 
 // Must match MAX_CONTEXT_LENGTH in evaluate/+server.ts so the judge sees the
 // same context window the LLM used during generation.
@@ -359,33 +357,16 @@ function classifyFailureType(
 /**
  * Call the judge LLM once for a single evaluation row
  */
-async function callJudgeOnce(
-  prompt: string,
-  judgeModel: string
-): Promise<JudgeScores | null> {
+async function callJudgeOnce(prompt: string, judgeModel: string): Promise<JudgeScores | null> {
   try {
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: judgeModel,
-        prompt,
-        stream: false,
-        options: {
-          temperature: 0,
-          top_p: 1,
-          num_predict: 200,
-        },
-      }),
+    const response = await generate({
+      model: judgeModel,
+      prompt,
+      temperature: 0,
+      topP: 1,
+      maxTokens: 200,
     });
-
-    if (!response.ok) {
-      console.error(`Judge LLM error: ${response.status}`);
-      return null;
-    }
-
-    const data = await response.json();
-    return parseJudgeResponse(data.response || '');
+    return parseJudgeResponse(response);
   } catch (error) {
     console.error('Judge LLM call failed:', error);
     return null;

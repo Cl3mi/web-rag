@@ -36,8 +36,12 @@ export function getDatabaseUrl(): string {
   return `postgres://${user}:${password}@${host}:${port}/${database}${sslParam}`;
 }
 
-// BGE-M3 embedding dimensions (1024d)
-export const EMBEDDING_DIMENSION = 1024;
+// Embedding dimensions — must match the active model and the pgvector column size.
+// Changing this requires: bun run db:generate && bun run db:push + full reindex.
+//   local  (Xenova/bge-m3):           1024
+//   openai (text-embedding-3-small):  1536
+//   openai (text-embedding-ada-002):  1536
+export const EMBEDDING_DIMENSION = getEnvInt('EMBEDDING_DIMENSION', 1024);
 
 // Vector search defaults
 export const VECTOR_SEARCH_DEFAULTS = {
@@ -57,7 +61,9 @@ export const CHUNKING_CONFIG = {
 
 // Embedding configuration
 export const EMBEDDING_CONFIG = {
-  model: 'Xenova/bge-m3',
+  provider: getEnv('EMBEDDING_PROVIDER', 'local') as 'local' | 'openai',
+  model: getEnv('LOCAL_EMBEDDING_MODEL', 'Xenova/bge-m3'),
+  openaiModel: getEnv('OPENAI_EMBEDDING_MODEL', 'text-embedding-3-small'),
   batchSize: 32,
   dimensions: EMBEDDING_DIMENSION,
 };

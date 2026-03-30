@@ -27,11 +27,9 @@ import {
 import { embedBatchDense, cosineSimilarity } from '$lib/server/embeddings/bge-m3';
 import { rerank } from '$lib/server/reranker';
 import { sql } from '$lib/server/db/client';
-import { env } from '$env/dynamic/private';
 import type { EvaluationConfig, SearchResult, QueryMetrics, PipelineMetrics, DocumentCoverageMetrics, CompressionMetrics } from '$lib/types';
 
-const OLLAMA_BASE_URL = env.OLLAMA_URL || 'http://localhost:11434';
-const DEFAULT_MODEL = env.OLLAMA_MODEL || 'llama3.2';
+import { generate, DEFAULT_MODEL } from '$lib/server/llm/client';
 
 const MAX_CONTEXT_LENGTH = 8000; // Truncate context to prevent overly large prompts
 
@@ -129,27 +127,13 @@ async function generateAnswer(
       ? context.slice(0, MAX_CONTEXT_LENGTH) + '\n...[truncated]'
       : context;
 
-    const response = await fetch(`${OLLAMA_BASE_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model,
-        prompt: `Answer the following question using ONLY the provided context. Use all relevant information the context contains. If a specific detail is not present, answer based on what is available.\n\nContext:\n${truncatedContext}\n\nQuestion: ${question}\n\nAnswer:`,
-        stream: false,
-        options: {
-          temperature: 0.3,
-          top_p: 0.9,
-          num_predict: 512,
-        },
-      }),
+    return await generate({
+      model,
+      prompt: `Answer the following question using ONLY the provided context. Use all relevant information the context contains. If a specific detail is not present, answer based on what is available.\n\nContext:\n${truncatedContext}\n\nQuestion: ${question}\n\nAnswer:`,
+      temperature: 0.3,
+      topP: 0.9,
+      maxTokens: 512,
     });
-
-    if (!response.ok) {
-      return '[Generation failed: Ollama returned ' + response.status + ']';
-    }
-
-    const data = await response.json();
-    return (data.response || '').trim();
   } catch (error) {
     console.error('Answer generation error:', error);
     return '[Generation failed: ' + (error instanceof Error ? error.message : 'unknown error') + ']';

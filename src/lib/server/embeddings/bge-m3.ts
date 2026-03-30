@@ -1,12 +1,13 @@
 /**
- * BGE-M3 Embedding Service
+ * Embedding Service
  *
- * Uses @xenova/transformers for local embedding generation.
- * Provides both dense (1024d) and sparse (BM25-style) embeddings.
+ * Dispatches to the configured provider (local BGE-M3 or OpenAI).
+ * Sparse (BM25-style) vectors are always computed locally.
  */
 
 import { pipeline } from '@xenova/transformers';
 import natural from 'natural';
+import { env } from '$env/dynamic/private';
 import { EMBEDDING_CONFIG, EMBEDDING_DIMENSION, CHUNKING_CONFIG } from '$lib/config/database';
 import type { EmbeddingResult } from '$lib/types';
 
@@ -94,44 +95,86 @@ function extractEmbeddingData(output: unknown): Float32Array {
   throw new Error('Unable to extract embedding data from model output');
 }
 
+// Read embedding config from $env/dynamic/private (Vite doesn't populate process.env in SvelteKit)
+function getEmbeddingProvider(): 'local' | 'openai' {
+  return (env.EMBEDDING_PROVIDER as 'local' | 'openai') || EMBEDDING_CONFIG.provider;
+}
+function getOpenAIEmbeddingModel(): string {
+  return env.OPENAI_EMBEDDING_MODEL || EMBEDDING_CONFIG.openaiModel;
+}
+function getRuntimeDimension(): number {
+  const fromEnv = parseInt(env.EMBEDDING_DIMENSION || '', 10);
+  return isNaN(fromEnv) ? EMBEDDING_DIMENSION : fromEnv;
+}
+
 /**
- * Generate dense embedding for text
+ * Generate dense embedding via OpenAI API
  */
-export async function embedDense(text: string): Promise<number[]> {
+async function embedDenseOpenAI(text: string): Promise<number[]> {
+  const apiKey = env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error('OPENAI_API_KEY not set');
+
+  const model = getOpenAIEmbeddingModel();
+  const res = await fetch('https://api.openai.com/v1/embeddings', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({ model, input: text }),
+  });
+
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`OpenAI embeddings error ${res.status}: ${body.slice(0, 200)}`);
+  }
+
+  const data = await res.json();
+  return data.data[0].embedding as number[];
+}
+
+/**
+ * Generate dense embedding using the local BGE-M3 model
+ */
+async function embedDenseLocal(text: string): Promise<number[]> {
   await initializeModel();
 
   if (!embeddingPipeline) {
     throw new Error('Embedding pipeline not initialized');
   }
 
-  try {
-    const output = await (embeddingPipeline as (
-      text: string,
-      options: { pooling: string; normalize: boolean }
-    ) => Promise<unknown>)(text, {
-      pooling: 'mean',
-      normalize: true,
-    });
+  const output = await (embeddingPipeline as (
+    text: string,
+    options: { pooling: string; normalize: boolean }
+  ) => Promise<unknown>)(text, {
+    pooling: 'mean',
+    normalize: true,
+  });
 
-    const embeddingData = extractEmbeddingData(output);
-    const embedding = Array.from(embeddingData);
+  const embeddingData = extractEmbeddingData(output);
+  const embedding = Array.from(embeddingData);
 
-    // Ensure correct dimensions
-    if (embedding.length !== EMBEDDING_DIMENSION) {
-      console.warn(
-        `Embedding dimension mismatch: got ${embedding.length}, expected ${EMBEDDING_DIMENSION}`
-      );
-
-      if (embedding.length < EMBEDDING_DIMENSION) {
-        while (embedding.length < EMBEDDING_DIMENSION) {
-          embedding.push(0);
-        }
-      } else {
-        embedding.length = EMBEDDING_DIMENSION;
-      }
+  const dim = getRuntimeDimension();
+  if (embedding.length !== dim) {
+    console.warn(`Embedding dimension mismatch: got ${embedding.length}, expected ${dim}`);
+    if (embedding.length < dim) {
+      while (embedding.length < dim) embedding.push(0);
+    } else {
+      embedding.length = dim;
     }
+  }
 
-    return embedding;
+  return embedding;
+}
+
+/**
+ * Generate dense embedding for text
+ */
+export async function embedDense(text: string): Promise<number[]> {
+  try {
+    return getEmbeddingProvider() === 'openai'
+      ? await embedDenseOpenAI(text)
+      : await embedDenseLocal(text);
   } catch (error) {
     console.error('Dense embedding error:', error);
     throw error;
@@ -335,10 +378,12 @@ export function isModelLoaded(): boolean {
 }
 
 /**
- * Preload the embedding model
+ * Preload the embedding model (no-op when EMBEDDING_PROVIDER=openai)
  */
 export async function preloadModel(): Promise<void> {
-  await initializeModel();
+  if (getEmbeddingProvider() !== 'openai') {
+    await initializeModel();
+  }
 }
 
 /**
