@@ -56,6 +56,7 @@ const config = PROVIDER_CONFIG[provider];
 // LLM_MODEL / LLM_JUDGE_MODEL act as global overrides across all providers
 export const DEFAULT_MODEL = env.LLM_MODEL || config.model;
 export const DEFAULT_JUDGE_MODEL = env.LLM_JUDGE_MODEL || config.judgeModel;
+export const ACTIVE_PROVIDER: Provider = provider;
 
 export async function generate(opts: GenerateOptions): Promise<string> {
   return provider === 'ollama' ? ollamaGenerate(opts) : openaiGenerate(opts);

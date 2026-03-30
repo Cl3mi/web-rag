@@ -23,6 +23,7 @@ export const POST: RequestHandler = async ({ request }) => {
       rerank: shouldRerank = false,
       threshold = 0.3,
       documentId,
+      hybridAlpha,  // optional: only accepted from Quick Search, ignored by all other callers
     } = body;
 
     // Support both old (traditional/facts) and new (chunk/fact/llm) naming
@@ -87,6 +88,9 @@ export const POST: RequestHandler = async ({ request }) => {
       results = await hybridSearch(query, {
         topK: shouldRerank ? topK * 3 : topK, // Fetch more for reranking
         minScore: threshold,
+        // Only applied when explicitly sent by the caller (Quick Search); all other
+        // call sites omit hybridAlpha so they always use the system default (0.7).
+        ...(typeof hybridAlpha === 'number' ? { alpha: hybridAlpha } : {}),
       });
     } else if (normalizedPipeline === 'llm') {
       results = await searchLLMChunks(query, {

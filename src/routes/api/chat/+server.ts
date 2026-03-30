@@ -10,7 +10,7 @@ import type { RequestHandler } from './$types';
 import { hybridSearch } from '$lib/server/pipeline/traditional/retriever';
 import { searchFacts } from '$lib/server/pipeline/facts/retriever';
 import { searchLLMChunks } from '$lib/server/pipeline/llm/retriever';
-import { generate, listModels, DEFAULT_MODEL, LLMError } from '$lib/server/llm/client';
+import { generate, listModels, DEFAULT_MODEL, ACTIVE_PROVIDER, LLMError } from '$lib/server/llm/client';
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
@@ -129,6 +129,11 @@ ${contextText}`;
  * List available Ollama models
  */
 export const GET: RequestHandler = async () => {
-  const models = await listModels();
-  return json({ models, defaultModel: DEFAULT_MODEL });
+  // For Ollama: fetch the live model list from the local instance.
+  // For OpenAI / OpenRouter: the model is fixed via env — return the default
+  // as a single-item list so the frontend always has something to display.
+  const models = ACTIVE_PROVIDER === 'ollama'
+    ? await listModels()
+    : [DEFAULT_MODEL];
+  return json({ models, defaultModel: DEFAULT_MODEL, provider: ACTIVE_PROVIDER });
 };

@@ -85,15 +85,20 @@
   // Chat state
   let chatInput = $state('');
   let chatPipeline = $state<'chunk' | 'fact' | 'llm'>('chunk');
-  let chatModel = $state('llama3.2');
+  let chatModel = $state('');
+  let chatProvider = $state<'ollama' | 'openai' | 'openrouter' | ''>('');
   let availableModels = $state<string[]>([]);
   let chatMessages = $state<ChatMessage[]>([]);
   let chatLoading = $state(false);
   let chatError = $state('');
 
   // Quick search state
+  const SEARCH_ALPHA_DEFAULT = 0.7; // mirrors VECTOR_SEARCH_DEFAULTS.hybridAlpha
   let searchQuery = $state('');
   let searchPipeline = $state<'chunk' | 'fact' | 'llm'>('chunk');
+  let searchTopK = $state(5);
+  let searchRerank = $state(false);
+  let searchAlpha = $state(SEARCH_ALPHA_DEFAULT); // chunk pipeline only: 1.0 = pure dense, 0.0 = pure sparse
   let searching = $state(false);
   let searchResults = $state<{ chunk: SearchResult[]; fact: SearchResult[]; llm: SearchResult[] }>({
     chunk: [],
@@ -123,6 +128,7 @@
       if (modelsRes.ok) {
         const modelsData = await modelsRes.json();
         availableModels = modelsData.models || [];
+        chatProvider = modelsData.provider || 'ollama';
         if (modelsData.defaultModel && availableModels.includes(modelsData.defaultModel)) {
           chatModel = modelsData.defaultModel;
         } else if (availableModels.length > 0) {
@@ -194,7 +200,6 @@
   async function search() {
     if (!searchQuery.trim()) return;
 
-  console.log(searchQuery);
     searching = true;
 
     try {
@@ -203,17 +208,17 @@
         fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: searchQuery, pipeline: 'chunk', topK: 5 }),
+          body: JSON.stringify({ query: searchQuery, pipeline: 'chunk', topK: searchTopK, rerank: searchRerank, hybridAlpha: searchAlpha }),
         }),
         fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: searchQuery, pipeline: 'fact', topK: 5 }),
+          body: JSON.stringify({ query: searchQuery, pipeline: 'fact', topK: searchTopK, rerank: searchRerank }),
         }),
         fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ query: searchQuery, pipeline: 'llm', topK: 5 }),
+          body: JSON.stringify({ query: searchQuery, pipeline: 'llm', topK: searchTopK, rerank: searchRerank }),
         }),
       ]);
 
@@ -350,15 +355,24 @@
             </div>
           </div>
           <div class="control-group">
-            <label class="control-label">Model</label>
-            {#if availableModels.length > 0}
-              <select class="input model-select" bind:value={chatModel}>
-                {#each availableModels as model}
-                  <option value={model}>{model}</option>
-                {/each}
-              </select>
+            <label class="control-label">
+              Model
+              {#if chatProvider}
+                <span class="provider-badge provider-{chatProvider}">{chatProvider}</span>
+              {/if}
+            </label>
+            {#if chatProvider === 'ollama'}
+              {#if availableModels.length > 0}
+                <select class="input model-select" bind:value={chatModel}>
+                  {#each availableModels as model}
+                    <option value={model}>{model}</option>
+                  {/each}
+                </select>
+              {:else}
+                <span class="no-models">No Ollama models running</span>
+              {/if}
             {:else}
-              <span class="no-models">No Ollama models found</span>
+              <span class="model-static">{chatModel}</span>
             {/if}
           </div>
           {#if chatMessages.length > 0}
@@ -429,12 +443,12 @@
           placeholder="Ask a question..."
           bind:value={chatInput}
           onkeydown={(e) => e.key === 'Enter' && sendChatMessage()}
-          disabled={chatLoading || availableModels.length === 0}
+          disabled={chatLoading || !chatModel}
         />
         <button
           class="btn btn-primary"
           onclick={sendChatMessage}
-          disabled={chatLoading || !chatInput.trim() || availableModels.length === 0}
+          disabled={chatLoading || !chatInput.trim() || !chatModel}
         >
           {#if chatLoading}
             <span class="spinner-small"></span>
@@ -444,11 +458,6 @@
         </button>
       </div>
 
-      {#if availableModels.length === 0}
-        <p class="ollama-hint">
-          Make sure Ollama is running locally. Install from <a href="https://ollama.ai" target="_blank" rel="noopener">ollama.ai</a> and run a model like <code>ollama run llama3.2</code>.
-        </p>
-      {/if}
     </section>
 
     <!-- Latest Evaluation Comparison -->
@@ -554,7 +563,7 @@
     <!-- Quick Search Test -->
     <section class="card search-section">
       <h2>Quick Search Test</h2>
-      <p class="section-desc">Test both pipelines side-by-side</p>
+      <p class="section-desc">Test all pipelines side-by-side</p>
 
       <div class="search-form">
         <input
@@ -564,6 +573,22 @@
           bind:value={searchQuery}
           onkeydown={(e) => e.key === 'Enter' && search()}
         />
+        <div class="search-controls">
+          <label class="search-control-label">
+            Top K
+            <input
+              type="number"
+              class="input topk-input"
+              min="1"
+              max="50"
+              bind:value={searchTopK}
+            />
+          </label>
+          <label class="search-control-label rerank-label">
+            <input type="checkbox" bind:checked={searchRerank} />
+            Rerank
+          </label>
+        </div>
         <button class="btn btn-primary" onclick={search} disabled={searching || !searchQuery.trim()}>
           {#if searching}
             <span class="spinner-small"></span>
@@ -572,6 +597,35 @@
             Search
           {/if}
         </button>
+      </div>
+
+      <div class="alpha-row">
+        <span class="alpha-label">
+          Sparse (BM25)
+          <span class="tooltip-icon" data-tooltip="Keyword matching — finds results containing the exact words in your query. Better for precise terms, names, or codes.">?</span>
+        </span>
+        <input
+          type="range"
+          class="alpha-slider"
+          min="0"
+          max="1"
+          step="0.05"
+          bind:value={searchAlpha}
+          ondblclick={() => searchAlpha = SEARCH_ALPHA_DEFAULT}
+          title="Double-click to reset to default ({SEARCH_ALPHA_DEFAULT})"
+        />
+        <span class="alpha-label">
+          Dense (vector)
+          <span class="tooltip-icon" data-tooltip="Semantic matching — finds results by meaning, not just words. Better for conceptual questions and paraphrased content.">?</span>
+        </span>
+        <span class="alpha-value">
+          dense {Math.round(searchAlpha * 100)}% / sparse {Math.round((1 - searchAlpha) * 100)}%
+        </span>
+        {#if searchAlpha !== SEARCH_ALPHA_DEFAULT}
+          <button class="btn-reset-alpha" onclick={() => searchAlpha = SEARCH_ALPHA_DEFAULT}>
+            Set Default
+          </button>
+        {/if}
       </div>
 
       {#if searchResults.chunk.length > 0 || searchResults.fact.length > 0 || searchResults.llm.length > 0}
@@ -841,10 +895,123 @@
     display: flex;
     gap: 12px;
     margin-bottom: 20px;
+    align-items: center;
   }
 
   .search-input {
     flex: 1;
+  }
+
+  .search-controls {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .search-control-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #aaa;
+    white-space: nowrap;
+  }
+
+  .topk-input {
+    width: 60px;
+    padding: 6px 8px;
+    text-align: center;
+  }
+
+  .rerank-label {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .alpha-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+
+  .alpha-slider {
+    flex: 1;
+    max-width: 220px;
+    accent-color: #7c6af7;
+  }
+
+  .alpha-label {
+    font-size: 12px;
+    color: #888;
+    white-space: nowrap;
+  }
+
+  .alpha-value {
+    font-size: 12px;
+    color: #ccc;
+    font-variant-numeric: tabular-nums;
+    min-width: 180px;
+  }
+
+  .tooltip-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: #555;
+    color: #aaa;
+    font-size: 0.6rem;
+    font-weight: 700;
+    cursor: default;
+    position: relative;
+    vertical-align: middle;
+    margin-left: 3px;
+  }
+
+  .tooltip-icon::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1a1a1a;
+    color: #ccc;
+    font-size: 0.75rem;
+    font-weight: 400;
+    line-height: 1.4;
+    padding: 7px 10px;
+    border-radius: 5px;
+    border: 1px solid #444;
+    width: 220px;
+    white-space: normal;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    z-index: 10;
+  }
+
+  .tooltip-icon:hover::after {
+    opacity: 1;
+  }
+
+  .btn-reset-alpha {
+    font-size: 11px;
+    color: #888;
+    background: none;
+    border: 1px solid #555;
+    border-radius: 4px;
+    padding: 2px 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .btn-reset-alpha:hover {
+    color: #ccc;
+    border-color: #888;
   }
 
   .search-results {
@@ -1016,6 +1183,27 @@
     color: #888;
     padding: 8px;
   }
+
+  .model-static {
+    font-size: 0.85rem;
+    color: #ccc;
+    padding: 8px 4px;
+  }
+
+  .provider-badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 4px;
+    margin-left: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
+  }
+
+  .provider-ollama    { background: #2a3a2a; color: #6dbf6d; }
+  .provider-openai    { background: #1a2e3a; color: #5ab8e8; }
+  .provider-openrouter { background: #2e2a3a; color: #b88ae8; }
 
   .btn-sm {
     padding: 8px 12px;
@@ -1190,23 +1378,6 @@
     flex: 1;
   }
 
-  .ollama-hint {
-    font-size: 0.8rem;
-    color: #888;
-    margin-top: 12px;
-    text-align: center;
-  }
-
-  .ollama-hint a {
-    color: #4da3ff;
-  }
-
-  .ollama-hint code {
-    background: #373737;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-size: 0.8rem;
-  }
 
   @media (max-width: 1200px) {
     .stats-grid {
