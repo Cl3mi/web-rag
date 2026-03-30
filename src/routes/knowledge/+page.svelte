@@ -73,33 +73,21 @@
     return [...domainSet].sort();
   });
 
-  // Filtered documents
+  // Domain filter applied client-side on top of server-filtered results
   let filteredDocuments = $derived.by(() => {
-    let filtered = documents;
-
-    if (selectedDomain) {
-      filtered = filtered.filter((d) => d.domain === selectedDomain);
-    }
-
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      filtered = filtered.filter(
-        (d) =>
-          d.title?.toLowerCase().includes(query) ||
-          d.url.toLowerCase().includes(query) ||
-          d.domain.toLowerCase().includes(query)
-      );
-    }
-
-    return filtered;
+    if (!selectedDomain) return documents;
+    return documents.filter((d) => d.domain === selectedDomain);
   });
 
-  async function loadDocuments() {
+  let searchTimer: ReturnType<typeof setTimeout> | undefined;
+
+  async function loadDocuments(q = '') {
     loading = true;
     error = '';
 
     try {
-      const res = await fetch('/api/documents');
+      const url = q.trim() ? `/api/documents?q=${encodeURIComponent(q.trim())}` : '/api/documents';
+      const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to load documents');
 
       const data = await res.json();
@@ -109,6 +97,12 @@
     } finally {
       loading = false;
     }
+  }
+
+  function handleSearchInput() {
+    clearTimeout(searchTimer);
+    const q = searchQuery;
+    searchTimer = setTimeout(() => loadDocuments(q), 300);
   }
 
   async function loadChunks(documentId: string) {
@@ -227,7 +221,7 @@
               reindexDone++;
             } else if (event.type === 'done') {
               reindexResult = { reindexed: event.reindexed, failed: event.failed, totalDocuments: event.total };
-              loadDocuments(); // refresh counts in doc list
+              loadDocuments(searchQuery); // refresh counts in doc list
             } else if (event.type === 'error') {
               reindexError = event.error;
             }
@@ -289,11 +283,25 @@
     }
   }
 
-  // Filtered chunks based on pipeline filter
+  // Filtered chunks based on pipeline filter and active search query
   let filteredChunks = $derived.by(() => {
-    if (pipelineFilter === 'all') return chunks;
-    return chunks.filter((c) => c.type === pipelineFilter);
+    let result = pipelineFilter === 'all' ? chunks : chunks.filter((c) => c.type === pipelineFilter);
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      result = result.filter((c) => c.content.toLowerCase().includes(q));
+    }
+    return result;
   });
+
+  function escapeHtml(text: string): string {
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function highlight(text: string, query: string): string {
+    if (!query.trim()) return escapeHtml(text);
+    const escapedQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return escapeHtml(text).replace(new RegExp(escapedQuery, 'gi'), '<mark class="hl">$&</mark>');
+  }
 
   onMount(() => {
     loadDocuments();
@@ -428,8 +436,9 @@
     <input
       type="text"
       class="input search-input"
-      placeholder="Search documents..."
+      placeholder="Search documents and chunks…"
       bind:value={searchQuery}
+      oninput={handleSearchInput}
     />
 
     <select class="input select" bind:value={selectedDomain}>
@@ -481,7 +490,7 @@
     {:else if error}
       <div class="error-state">
         <p>{error}</p>
-        <button class="btn btn-secondary" onclick={loadDocuments}>Retry</button>
+        <button class="btn btn-secondary" onclick={() => loadDocuments(searchQuery)}>Retry</button>
       </div>
     {:else if filteredDocuments.length === 0}
       <div class="empty-state">
@@ -534,18 +543,21 @@
                     <div class="spinner"></div>
                   </div>
                 {:else if filteredChunks.length === 0}
-                  <p class="no-chunks">No chunks found for this filter.</p>
+                  <p class="no-chunks">{searchQuery.trim() ? 'No chunks match the current search.' : 'No chunks found for this filter.'}</p>
                 {:else}
+                  {#if searchQuery.trim()}
+                    <p class="chunks-match-hint">{filteredChunks.length} chunk{filteredChunks.length !== 1 ? 's' : ''} match</p>
+                  {/if}
                   <div class="chunks-list">
                     {#each filteredChunks as chunk}
                       <div class="chunk-card {chunk.type}">
                         <div class="chunk-header">
-                          <span class="badge 
+                          <span class="badge
                             {chunk.type === 'chunk' ? 'badge-blue' : chunk.type === 'fact' ? 'badge-green' : 'badge-purple'}">
-                            {chunk.type === 'chunk' 
-                            ? 'Chunk' 
-                            : chunk.type === 'fact' 
-                            ? 'Fact' 
+                            {chunk.type === 'chunk'
+                            ? 'Chunk'
+                            : chunk.type === 'fact'
+                            ? 'Fact'
                             : 'Summary'}
                           </span>
                           {#if chunk.metadata?.category}
@@ -555,7 +567,8 @@
                             <span class="confidence">{(chunk.metadata.confidence as number * 100).toFixed(0)}% confidence</span>
                           {/if}
                         </div>
-                        <div class="chunk-content">{chunk.content}</div>
+                        <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+                        <div class="chunk-content">{@html highlight(chunk.content, searchQuery)}</div>
                       </div>
                     {/each}
                   </div>
@@ -883,8 +896,21 @@
   .chunks-section {
     border-top: 1px solid #444;
     padding: 16px;
-    max-height: 500px;
+    max-height: 600px;
     overflow-y: auto;
+  }
+
+  .chunks-match-hint {
+    font-size: 0.78rem;
+    color: #888;
+    margin: 0 0 8px;
+  }
+
+  :global(mark.hl) {
+    background: rgba(255, 213, 0, 0.35);
+    color: #ffd500;
+    border-radius: 2px;
+    padding: 0 1px;
   }
 
   .no-chunks {

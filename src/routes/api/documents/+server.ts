@@ -1,32 +1,88 @@
 /**
  * Documents API Endpoint
  *
- * GET /api/documents
- * List all indexed documents for selection.
+ * GET /api/documents?q=<text>
+ * List documents. When q is provided, filters to documents whose title/url/domain
+ * or any chunk content (across all three pipelines) contains the query.
  */
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { sql } from '$lib/server/db/client';
 
-/**
- * GET /api/documents
- * Get all documents with basic info for selection
- */
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ url }) => {
+  const q = url.searchParams.get('q')?.trim() ?? '';
+
   try {
-    const rows = await sql`
-      SELECT
-        d.id, d.url, d.title, d.domain, d.created_at, d.updated_at,
-        COUNT(DISTINCT tc.id) AS chunk_count,
-        COUNT(DISTINCT fc.id) AS fact_count
-      FROM documents d
-      LEFT JOIN traditional_chunks tc ON tc.document_id = d.id
-      LEFT JOIN facts_chunks fc ON fc.document_id = d.id
-      GROUP BY d.id, d.url, d.title, d.domain, d.created_at, d.updated_at
-      ORDER BY d.updated_at DESC
-      LIMIT 500
-    `;
+    let rows: Record<string, unknown>[];
+
+    if (q) {
+      const like = `%${q}%`;
+
+      // Try including llm_chunks; fall back without it if the table doesn't exist yet.
+      try {
+        rows = await sql.unsafe(
+          `
+          SELECT
+            d.id, d.url, d.title, d.domain, d.created_at, d.updated_at,
+            COUNT(DISTINCT tc.id) AS chunk_count,
+            COUNT(DISTINCT fc.id) AS fact_count
+          FROM documents d
+          LEFT JOIN traditional_chunks tc ON tc.document_id = d.id
+          LEFT JOIN facts_chunks fc ON fc.document_id = d.id
+          WHERE (
+            d.title        ILIKE $1 OR
+            d.url          ILIKE $1 OR
+            d.domain       ILIKE $1 OR
+            EXISTS (SELECT 1 FROM traditional_chunks WHERE document_id = d.id AND content_markdown ILIKE $1) OR
+            EXISTS (SELECT 1 FROM facts_chunks       WHERE document_id = d.id AND content           ILIKE $1) OR
+            EXISTS (SELECT 1 FROM llm_chunks         WHERE document_id = d.id AND (summary ILIKE $1 OR original_content ILIKE $1))
+          )
+          GROUP BY d.id, d.url, d.title, d.domain, d.created_at, d.updated_at
+          ORDER BY d.updated_at DESC
+          LIMIT 500
+          `,
+          [like]
+        );
+      } catch {
+        // llm_chunks table may not exist yet
+        rows = await sql.unsafe(
+          `
+          SELECT
+            d.id, d.url, d.title, d.domain, d.created_at, d.updated_at,
+            COUNT(DISTINCT tc.id) AS chunk_count,
+            COUNT(DISTINCT fc.id) AS fact_count
+          FROM documents d
+          LEFT JOIN traditional_chunks tc ON tc.document_id = d.id
+          LEFT JOIN facts_chunks fc ON fc.document_id = d.id
+          WHERE (
+            d.title  ILIKE $1 OR
+            d.url    ILIKE $1 OR
+            d.domain ILIKE $1 OR
+            EXISTS (SELECT 1 FROM traditional_chunks WHERE document_id = d.id AND content_markdown ILIKE $1) OR
+            EXISTS (SELECT 1 FROM facts_chunks       WHERE document_id = d.id AND content           ILIKE $1)
+          )
+          GROUP BY d.id, d.url, d.title, d.domain, d.created_at, d.updated_at
+          ORDER BY d.updated_at DESC
+          LIMIT 500
+          `,
+          [like]
+        );
+      }
+    } else {
+      rows = await sql`
+        SELECT
+          d.id, d.url, d.title, d.domain, d.created_at, d.updated_at,
+          COUNT(DISTINCT tc.id) AS chunk_count,
+          COUNT(DISTINCT fc.id) AS fact_count
+        FROM documents d
+        LEFT JOIN traditional_chunks tc ON tc.document_id = d.id
+        LEFT JOIN facts_chunks fc ON fc.document_id = d.id
+        GROUP BY d.id, d.url, d.title, d.domain, d.created_at, d.updated_at
+        ORDER BY d.updated_at DESC
+        LIMIT 500
+      `;
+    }
 
     // Fetch LLM counts separately (table may not exist yet)
     let llmCounts: Record<string, number> = {};
@@ -39,8 +95,7 @@ export const GET: RequestHandler = async () => {
       }
     } catch { /* llm_chunks table not yet created */ }
 
-    // Map to camelCase for frontend
-    const documents = rows.map((row: Record<string, unknown>) => ({
+    const documents = rows.map((row) => ({
       id: row.id,
       url: row.url,
       title: row.title,
