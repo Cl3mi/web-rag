@@ -29,7 +29,7 @@ function createEmbeddingText(summary: string, original: string): string {
   // Combine summary (for semantic focus) with truncated original (for details)
   // Summary first gives it more weight in the embedding
   const truncatedOriginal = original.slice(0, 500);
-  return `${summary}\n\n${truncatedOriginal}`;
+  return summary;
 }
 
 /**

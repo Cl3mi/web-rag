@@ -20,7 +20,7 @@ export interface SummarizedChunk {
 }
 
 async function summarizeChunk(content: string, model: string = DEFAULT_MODEL): Promise<string> {
-  const prompt = `Summarize the following text in 1-2 concise sentences. Focus on the key facts, concepts, or instructions. Be specific and informative. IMPORTANT: ONLY RETURN THE SUMMARY.
+  const prompt = `You are a precise summarizer. Summarize the following text in concise sentences without loosing crucial information. Focus on the key facts, concepts, or instructions. Be specific and informative. Do NOT reproduce the original text verbatim. IMPORTANT: ONLY RETURN THE SUMMARY.
 
 Text:
 ${content}
@@ -28,9 +28,10 @@ ${content}
 Summary:`;
 
   try {
-    return await generate({ model, prompt, temperature: 0.3, topP: 0.9, maxTokens: 100 });
+    return await generate({ model, prompt, temperature: 0.3, topP: 0.9, maxTokens: 150 });
   } catch (error) {
-    console.error('LLM summarization error:', error);
+    console.warn('[summarizer] summarizeChunk failed, falling back to raw slice:',
+      error instanceof Error ? error.message : error);
     return content.slice(0, 200) + (content.length > 200 ? '...' : '');
   }
 }
