@@ -271,7 +271,7 @@ export interface RagRunEvaluation {
 export interface JudgeScores {
   groundedness: number;
   completeness: number;
-  correctness: number;
+  answerQuality: number;
   hallucination: boolean;
   answerableFromContext?: boolean;
 }
@@ -320,7 +320,7 @@ export type FailureType = 'generation_failure' | 'retrieval_failure' | 'robust_g
 export interface PipelineQualityMetrics {
   pipelineName: string;
   meanGroundedness: number;
-  meanCorrectness: number;
+  meanAnswerQuality: number;
   meanCompleteness: number;
   hallucinationRate: number;
   judgeMean: number;

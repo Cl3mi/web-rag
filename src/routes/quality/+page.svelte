@@ -12,7 +12,7 @@
 
   interface QualityMetrics {
     meanGroundedness: number;
-    meanCorrectness: number;
+    meanAnswerQuality: number;
     meanCompleteness: number;
     hallucinationRate: number;
     judgeMean: number;
@@ -63,7 +63,7 @@
     retrievedContext: string;
     groundedness: number;
     completeness: number;
-    correctness: number;
+    answerQuality: number;
     hallucination: boolean;
     failureType: string | null;
     recallAtK: number | null;
@@ -116,7 +116,7 @@
 
   // Best pipeline per metric (all 5 metrics)
   let bestPipeline = $derived.by(() => {
-    if (pipelines.length === 0) return { groundedness: '', correctness: '', completeness: '', hallucination: '', judgeMean: '' };
+    if (pipelines.length === 0) return { groundedness: '', answerQuality: '', completeness: '', hallucination: '', judgeMean: '' };
     const best = (metric: keyof QualityMetrics, higher: boolean = true) => {
       let bestName = '';
       let bestVal = higher ? -1 : Infinity;
@@ -131,7 +131,7 @@
     };
     return {
       groundedness: best('meanGroundedness'),
-      correctness: best('meanCorrectness'),
+      answerQuality: best('meanAnswerQuality'),
       completeness: best('meanCompleteness'),
       hallucination: best('hallucinationRate', false),
       judgeMean: best('judgeMean'),
@@ -155,7 +155,7 @@
       if (!prev) continue;
       result[pipeline] = {
         meanGroundedness:    cur.meanGroundedness  - prev.meanGroundedness,
-        meanCorrectness:     cur.meanCorrectness   - prev.meanCorrectness,
+        meanAnswerQuality:   cur.meanAnswerQuality  - prev.meanAnswerQuality,
         meanCompleteness:    cur.meanCompleteness  - prev.meanCompleteness,
         hallucinationRate:   cur.hallucinationRate - prev.hallucinationRate,
         judgeMean:           cur.judgeMean         - prev.judgeMean,
@@ -470,13 +470,13 @@
                   {/if}
                 </div>
                 <div class="score-item">
-                  <div class="score-value {scoreColor(m.meanCorrectness)}">{formatScore(m.meanCorrectness)}</div>
+                  <div class="score-value {scoreColor(m.meanAnswerQuality)}">{formatScore(m.meanAnswerQuality)}</div>
                   <div class="score-label">Correctness</div>
-                  {#if bestPipeline.correctness === pipeline}
+                  {#if bestPipeline.answerQuality === pipeline}
                     <span class="best-badge">Best</span>
                   {/if}
-                  {#if (deltaMetrics?.[pipeline]?.['meanCorrectness'] ?? 0) !== 0}
-                    {@const dc = deltaMetrics?.[pipeline]?.['meanCorrectness'] ?? 0}
+                  {#if (deltaMetrics?.[pipeline]?.['meanAnswerQuality'] ?? 0) !== 0}
+                    {@const dc = deltaMetrics?.[pipeline]?.['meanAnswerQuality'] ?? 0}
                     <div class="score-delta" class:delta-up={dc > 0} class:delta-down={dc < 0}>
                       {dc > 0 ? '▲' : '▼'} {Math.abs(dc).toFixed(2)}
                     </div>
@@ -721,7 +721,7 @@
                       <span class="detail-pipeline pipeline-{row.pipelineName}">{row.pipelineName}</span>
                       <span class="detail-question">{row.question}</span>
                       <span class="detail-scores">
-                        G:{row.groundedness} C:{row.correctness} Cm:{row.completeness}
+                        G:{row.groundedness} C:{row.answerQuality} Cm:{row.completeness}
                         {#if row.hallucination}<span class="halluc-tag">H</span>{/if}
                       </span>
                       <span class="detail-recall">R@k: {row.recallAtK !== null ? row.recallAtK.toFixed(2) : '-'}</span>
@@ -734,7 +734,7 @@
                         <div class="detail-meta">
                           Judge Mean: {row.judgeMean.toFixed(2)} |
                           Groundedness: {row.groundedness}/5 |
-                          Correctness: {row.correctness}/5 |
+                          Correctness: {row.answerQuality}/5 |
                           Completeness: {row.completeness}/5 |
                           Recall@k: {row.recallAtK !== null ? row.recallAtK.toFixed(2) : 'N/A'}
                         </div>

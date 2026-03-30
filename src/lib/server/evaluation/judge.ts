@@ -57,151 +57,111 @@ const JUDGE_MEAN_THRESHOLD = 3.0; // judgeMean >= this → generation is conside
 // for training positive examples.
 
 
-const JUDGE_PROMPT = `You are a strict and deterministic evaluator for a Retrieval-Augmented Generation (RAG) system.
+const JUDGE_PROMPT = `You are a strict evaluator for a Retrieval-Augmented Generation (RAG) system.
+You think like a non-technical end user who asked a question and received an answer.
+Your only concern: was the answer actually helpful?
 
 You will be given:
 - a QUESTION
 - a CONTEXT (retrieved documents)
 - an ANSWER (model output)
 
-Your task is to evaluate the ANSWER ONLY based on the provided CONTEXT.
-
 ==============================
-GLOBAL RULES (VERY IMPORTANT)
+GLOBAL RULES
 ==============================
 
 1. CONTEXT IS THE ONLY SOURCE OF TRUTH
-- Use ONLY the provided CONTEXT.
-- Do NOT use your own knowledge.
-- If something is true in the real world but NOT present in the CONTEXT, it MUST be treated as unsupported.
+Use ONLY the provided CONTEXT. Do NOT use your own knowledge.
+If something is true in the real world but NOT in the CONTEXT, treat it as unsupported.
 
 2. CLAIM TRACEABILITY
-- Every factual statement in the ANSWER must be explicitly supported by the CONTEXT.
-- Unsupported information = hallucination.
+Every factual statement in the ANSWER must be explicitly supported by the CONTEXT.
+Unsupported information = hallucination.
 
 3. DETERMINE ANSWERABILITY FIRST
-Before scoring anything, decide:
+Before scoring, decide:
+  answerable_from_context = true  → sufficient information exists in the CONTEXT
+  answerable_from_context = false → the CONTEXT does NOT contain the necessary information
 
-Can the QUESTION be answered using the provided CONTEXT?
+4. ABSTENTION HANDLING
+If the ANSWER says information is not in the context / cannot be determined:
 
-Set:
-answerable_from_context = true  → if sufficient information exists in the CONTEXT
-answerable_from_context = false → if the CONTEXT does NOT contain the necessary information
+  IF answerable_from_context = true:
+  → completeness = 1, answer_quality = 1 (failure to use available information)
 
-This decision must be based strictly on the CONTEXT.
+  IF answerable_from_context = false:
+  → groundedness = 5 (no unsupported claims)
+  → completeness = 1 (task not completed)
+  → answer_quality = 3 (honest refusal has some value — better than inventing)
 
-4. ABSTENTION HANDLING (CRITICAL FOR RAG)
+5. USER PERSPECTIVE (CRITICAL)
+Always ask: "If I were a non-technical user who asked this question, would I be satisfied?"
 
-If the ANSWER says or implies:
-- information is not in the context
-- cannot be determined
-- not provided / not mentioned
+A good answer:
+- Directly addresses what was asked without preamble
+- Is concise — no unnecessary caveats or repetition
+- Does NOT reference "the context" or "the documents" — users don't know about these
+- Gives a clear conclusion, not just a list of raw facts
 
-Then:
+Penalize answer_quality for:
+- Excessive hedging ("it might be", "possibly", "it seems") when the context is clear
+- Referencing "the context" or "retrieved documents" directly in the answer
+- Padding or repetition without added value
+- Starting with meta-commentary instead of the actual answer
 
-IF answerable_from_context = true:
-→ This is a failure to use retrieved information.
-Set:
-- completeness = 1
-- answer_quality = 1
+6. BE STRICT
+Prefer lower scores when uncertain. Do not reward vague or partially correct answers.
 
-IF answerable_from_context = false:
-→ This is correct behavior.
-→ groundedness = 5 (no unsupported claims)
-→ completeness = 1 (the task is not completed)
-→ answer_quality = 1 (provides no value to the user)
+==============================
+SCORING MATRIX
+==============================
 
-Do NOT mark this as hallucination unless unsupported facts are added.
-
-5. BE STRICT AND CONSISTENT
-Prefer lower scores when uncertain.
-Do not reward partially correct or vague answers.
+| Situation                                  | groundedness | completeness | answer_quality | hallucination |
+|--------------------------------------------|:------------:|:------------:|:--------------:|:-------------:|
+| Context has answer, model answers well     |      5       |      5       |       5        |     false     |
+| Context has answer, model refuses          |      —       |      1       |       1        |     false     |
+| Context lacks answer, model refuses        |      5       |      1       |       3        |     false     |
+| Context lacks answer, model invents        |     ≤2       |      —       |      ≤2        |     true      |
 
 ==============================
 METRICS
 ==============================
 
-1. groundedness (1–5)
-How well are the claims supported by the CONTEXT?
+1. groundedness (1–5): Are all claims in the ANSWER supported by the CONTEXT?
+  1 = Mostly unsupported or contradicts context
+  2 = Many unsupported claims
+  3 = Mix of supported and unsupported
+  4 = Mostly supported, minor untraceable details
+  5 = Every claim directly supported
+  Rule: If hallucination = true → groundedness must be ≤ 3
 
-1 = Mostly unsupported or contradicts context  
-2 = Many unsupported claims  
-3 = Mix of supported and unsupported claims  
-4 = Mostly supported with minor untraceable details  
-5 = Every claim is directly supported by the context  
+2. completeness (1–5): How much relevant CONTEXT information is used?
+  If answerable_from_context = true:
+    1 = Misses most key info or refuses despite available info
+    3 = Uses some relevant info but misses important parts
+    5 = Uses all key information needed to answer
+  If answerable_from_context = false:
+    1 = Correct refusal (or attempted answer with invented content)
 
-If hallucination = true, groundedness must be ≤ 3.
+3. answer_quality (1–5): How well does the answer serve the user?
+  1 = Does not answer, incorrect refusal, misleading, or heavily padded
+  2 = Very weak, mostly irrelevant, or exposes internal system details
+  3 = Partial answer OR honest refusal when context lacks the answer
+  4 = Good and mostly complete, minor issues
+  5 = Clear, direct, concise, helpful — reads like a human expert answered
+  Rule: If answerable_from_context = true and model refuses → score = 1
 
----
-
-2. completeness (1–5)
-How much relevant information from the CONTEXT (that answers the question) is used?
-
-If answerable_from_context = true:
-1 = Misses most key information or refuses despite available info  
-3 = Uses some relevant information but misses important parts  
-5 = Uses all key information needed to answer  
-
-If answerable_from_context = false:
-1 = Correctly states that the information is not available (or attempts to answer with invented content)
-5 = (Not applicable — correct refusals score 1 on completeness)
-
----
-
-3. answer_quality (1–5)
-How well does the answer address the user's question?
-
-1 = Does not answer the question, incorrect refusal, or misleading  
-2 = Very weak or mostly irrelevant  
-3 = Partially answers but incomplete or unclear  
-4 = Good and mostly complete  
-5 = Clear, direct, helpful, and appropriate  
-
-If answerable_from_context = true and the model refuses → score = 1.
-
----
-
-4. hallucination (true/false)
-Does the answer contain ANY information not supported by the CONTEXT?
-
-true  = Any unsupported factual content is present  
-false = All information is traceable to the context  
-
-Note:
-If the model incorrectly claims "information not in context" while it actually is present,
-this is NOT hallucination — it is a completeness/quality failure.
-
-==============================
-SCORING EDGE CASES
-==============================
-
-Case A — Context contains answer, model answers correctly:
-→ High scores across all metrics
-
-Case B — Context contains answer, model says "not in context":
-→ answerable_from_context = true  
-→ completeness = 1  
-→ answer_quality = 1  
-→ hallucination = false  
-
-Case C — Context does NOT contain answer, model refuses:
-→ answerable_from_context = false
-→ groundedness = 5 (no unsupported claims are made)
-→ completeness = 1 (the task is not completed — context lacks the answer)
-→ answer_quality = 1 (provides no value to the user)
-→ hallucination = false
-
-Case D — Context does NOT contain answer, model invents:
-→ answerable_from_context = false  
-→ hallucination = true  
-→ groundedness ≤ 2  
-→ answer_quality ≤ 2  
+4. hallucination (true/false): Any information NOT supported by the CONTEXT?
+  true  = Any unsupported factual content present
+  false = All information traceable to context
+  Note: Claiming "not in context" when it IS present is NOT hallucination —
+        it is a completeness/answer_quality failure.
 
 ==============================
 OUTPUT FORMAT (STRICT)
 ==============================
 
-Return ONLY valid JSON. No explanations.
+Return ONLY valid JSON. No explanation, no preamble, no markdown.
 
 QUESTION: {question}
 
@@ -212,7 +172,6 @@ ANSWER:
 {answer}
 
 Return EXACTLY:
-
 {
   "answerable_from_context": <true|false>,
   "groundedness": <1-5>,
@@ -255,8 +214,8 @@ function parseJudgeResponse(response: string): JudgeScores | null {
 
         const groundedness = Number(parsed.groundedness);
         const completeness = Number(parsed.completeness);
-        // Accept either field name — prompt was updated to use answer_quality
-        const correctness = Number(parsed.correctness ?? parsed.answer_quality);
+        // Accept either field name — prefer answer_quality, fall back to correctness for old responses
+        const answerQuality = Number(parsed.answer_quality ?? parsed.correctness);
         const hallucination = parsed.hallucination === true || parsed.hallucination === 'true';
         const answerableFromContext =
           parsed.answerable_from_context === false ||
@@ -270,9 +229,9 @@ function parseJudgeResponse(response: string): JudgeScores | null {
         if (
           groundedness >= 1 && groundedness <= 5 &&
           completeness >= 1 && completeness <= 5 &&
-          correctness >= 1 && correctness <= 5
+          answerQuality >= 1 && answerQuality <= 5
         ) {
-          return { groundedness, completeness, correctness, hallucination, answerableFromContext };
+          return { groundedness, completeness, answerQuality, hallucination, answerableFromContext };
         }
       } catch {
         continue;
@@ -362,9 +321,9 @@ async function callJudgeOnce(prompt: string, judgeModel: string): Promise<JudgeS
     const response = await generate({
       model: judgeModel,
       prompt,
-      temperature: 0,
-      topP: 1,
-      maxTokens: 200,
+      temperature: 0.2,
+      topP: 0.95,
+      maxTokens: 300,
     });
     return parseJudgeResponse(response);
   } catch (error) {
@@ -406,7 +365,7 @@ async function judgeRow(
   const n = results.length;
   const groundedness = results.reduce((s, r) => s + r.groundedness, 0) / n;
   const completeness = results.reduce((s, r) => s + r.completeness, 0) / n;
-  const correctness = results.reduce((s, r) => s + r.correctness, 0) / n;
+  const answerQuality = results.reduce((s, r) => s + r.answerQuality, 0) / n;
 
   // Majority vote for hallucination
   const hallucinationVotes = results.filter((r) => r.hallucination).length;
@@ -420,7 +379,7 @@ async function judgeRow(
     answerableFromContext = notAnswerableVotes > answerableWithOpinion.length / 2 ? false : true;
   }
 
-  return { groundedness, completeness, correctness, hallucination, answerableFromContext };
+  return { groundedness, completeness, answerQuality, hallucination, answerableFromContext };
 }
 
 /**
@@ -471,7 +430,7 @@ export async function runJudge(options: {
         continue;
       }
 
-      const scoreValues = [scores.groundedness, scores.completeness, scores.correctness];
+      const scoreValues = [scores.groundedness, scores.completeness, scores.answerQuality];
       const mean = scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length;
       const variance = scoreValues.reduce((sum, s) => sum + Math.pow(s - mean, 2), 0) / scoreValues.length;
       const std = Math.sqrt(variance);
@@ -515,7 +474,7 @@ export async function runJudge(options: {
       const unanswerable = scores.answerableFromContext === false;
       const gRounded = unanswerable ? 0 : Math.round(scores.groundedness);
       const cmRounded = unanswerable ? 0 : Math.round(scores.completeness);
-      const crRounded = unanswerable ? 0 : Math.round(scores.correctness);
+      const crRounded = unanswerable ? 0 : Math.round(scores.answerQuality);
       const meanToStore = unanswerable ? 0 : mean;
       const stdToStore = unanswerable ? 0 : std;
       // Store answerableFromContext so repairFailureTypes() can use it without
@@ -636,7 +595,7 @@ export async function repairFailureTypes(): Promise<{ repaired: number }> {
  */
 export async function getQualityMetrics(): Promise<Record<string, {
   meanGroundedness: number;
-  meanCorrectness: number;
+  meanAnswerQuality: number;
   meanCompleteness: number;
   hallucinationRate: number;
   judgeMean: number;
@@ -667,7 +626,7 @@ export async function getQualityMetrics(): Promise<Record<string, {
 
   const result: Record<string, {
     meanGroundedness: number;
-    meanCorrectness: number;
+    meanAnswerQuality: number;
     meanCompleteness: number;
     hallucinationRate: number;
     judgeMean: number;
@@ -678,7 +637,7 @@ export async function getQualityMetrics(): Promise<Record<string, {
   for (const row of rows) {
     result[row.pipeline_name as string] = {
       meanGroundedness: Number(row.mean_groundedness) || 0,
-      meanCorrectness: Number(row.mean_correctness) || 0,
+      meanAnswerQuality: Number(row.mean_correctness) || 0,
       meanCompleteness: Number(row.mean_completeness) || 0,
       hallucinationRate: Number(row.hallucination_rate) || 0,
       judgeMean: Number(row.judge_mean) || 0,
@@ -706,7 +665,7 @@ export async function getJudgeResultsForRun(runId: string): Promise<Array<{
   generatedAnswer: string;
   groundedness: number;
   completeness: number;
-  correctness: number;
+  answerQuality: number;
   hallucination: boolean;
   failureType: string | null;
   recallAtK: number | null;
@@ -734,7 +693,7 @@ export async function getJudgeResultsForRun(runId: string): Promise<Array<{
     generatedAnswer: r.generated_answer as string,
     groundedness: Number(r.groundedness_score),
     completeness: Number(r.completeness_score),
-    correctness: Number(r.correctness_score),
+    answerQuality: Number(r.correctness_score),
     hallucination: r.hallucination as boolean,
     failureType: r.failure_type as string | null,
     recallAtK: r.recall_at_k as number | null,
@@ -749,7 +708,7 @@ export interface JudgeDetailRow {
   retrievedContext: string;
   groundedness: number;
   completeness: number;
-  correctness: number;
+  answerQuality: number;
   hallucination: boolean;
   failureType: string | null;
   recallAtK: number | null;
@@ -827,7 +786,7 @@ export async function getJudgeDetails(options: {
     retrievedContext: r.retrieved_context as string,
     groundedness: Number(r.groundedness_score),
     completeness: Number(r.completeness_score),
-    correctness: Number(r.correctness_score),
+    answerQuality: Number(r.correctness_score),
     hallucination: r.hallucination as boolean,
     failureType: r.failure_type as string | null,
     recallAtK: r.recall_at_k as number | null,
@@ -837,7 +796,7 @@ export async function getJudgeDetails(options: {
 
 export interface QualityMetrics {
   meanGroundedness: number;
-  meanCorrectness: number;
+  meanAnswerQuality: number;
   meanCompleteness: number;
   hallucinationRate: number;
   judgeMean: number;
@@ -876,7 +835,7 @@ export async function getQualityMetricsByRun(runId: string): Promise<Record<stri
   for (const row of rows) {
     result[row.pipeline_name as string] = {
       meanGroundedness: Number(row.mean_groundedness) || 0,
-      meanCorrectness: Number(row.mean_correctness) || 0,
+      meanAnswerQuality: Number(row.mean_correctness) || 0,
       meanCompleteness: Number(row.mean_completeness) || 0,
       hallucinationRate: Number(row.hallucination_rate) || 0,
       judgeMean: Number(row.judge_mean) || 0,
