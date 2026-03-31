@@ -357,6 +357,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
+    justify-content: space-between;
   }
   .field-row label {
     font-size: 13px;
@@ -366,6 +367,8 @@
   }
   .text-input {
     flex: 1;
+    min-width: 0;
+    max-width: 250px;
     background: #1a1a1a;
     border: 1px solid rgba(255, 255, 255, 0.12);
     border-radius: 6px;
