@@ -12,7 +12,8 @@
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
 		"db:push": "bunx drizzle-kit push",
 		"db:generate": "bunx drizzle-kit generate",
-		"db:studio": "bunx drizzle-kit studio"
+		"db:studio": "bunx drizzle-kit studio",
+		"build:widget": "vite build --config vite.widget.config.ts"
 	},
 	"devDependencies": {
 		"@sveltejs/adapter-auto": "^7.0.0",
