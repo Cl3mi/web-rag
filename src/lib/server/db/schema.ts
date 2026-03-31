@@ -329,3 +329,16 @@ export type NewRagPreference = typeof ragPreferences.$inferInsert;
 
 export type RagModel = typeof ragModels.$inferSelect;
 export type NewRagModel = typeof ragModels.$inferInsert;
+
+// Widget configuration — single-row table (id always = 1)
+export const widgetConfig = pgTable('widget_config', {
+  id: integer('id').primaryKey(),
+  bgColor: text('bg_color').notNull().default('#0d0f1a'),
+  primaryColor: text('primary_color').notNull().default('#6366f1'),
+  title: text('title').notNull().default('Assistant'),
+  badgeLabel: text('badge_label').notNull().default(''),
+  badgeUrl: text('badge_url').notNull().default(''),
+  updatedAt: timestamp('updated_at').defaultNow().notNull(),
+});
+
+export type WidgetConfig = typeof widgetConfig.$inferSelect;

@@ -433,6 +433,24 @@ export async function initializeDatabase(): Promise<void> {
       CREATE INDEX IF NOT EXISTS rag_models_active_idx ON rag_models(active)
     `;
 
+    // Widget configuration (single-row, id=1 always)
+    await client`
+      CREATE TABLE IF NOT EXISTS widget_config (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        bg_color TEXT NOT NULL DEFAULT '#0d0f1a',
+        primary_color TEXT NOT NULL DEFAULT '#6366f1',
+        title TEXT NOT NULL DEFAULT 'Assistant',
+        badge_label TEXT NOT NULL DEFAULT '',
+        badge_url TEXT NOT NULL DEFAULT '',
+        updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `;
+    await client`INSERT INTO widget_config (id) VALUES (1) ON CONFLICT DO NOTHING`;
+    // Migrate existing widget_config rows
+    await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Assistant'`;
+    await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS badge_label TEXT NOT NULL DEFAULT ''`;
+    await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS badge_url TEXT NOT NULL DEFAULT ''`;
+
     console.log('Database initialized successfully with pgvector and HNSW indexes');
   } catch (error) {
     console.error('Failed to initialize database:', error);
