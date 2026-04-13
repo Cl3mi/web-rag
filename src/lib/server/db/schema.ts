@@ -338,6 +338,8 @@ export const widgetConfig = pgTable('widget_config', {
   title: text('title').notNull().default('Assistant'),
   badgeLabel: text('badge_label').notNull().default(''),
   badgeUrl: text('badge_url').notNull().default(''),
+  emptyText: text('empty_text').notNull().default('Ask anything about the knowledge base'),
+  suggestedQuestions: jsonb('suggested_questions').$type<string[]>().notNull().default([]),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 });
 

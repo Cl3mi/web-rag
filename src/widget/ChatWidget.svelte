@@ -37,6 +37,8 @@
   let title = $state('Assistant');
   let badgeLabel = $state('');
   let badgeUrl = $state('');
+  let emptyText = $state('Ask anything about the knowledge base');
+  let suggestedQuestions = $state<string[]>([]);
 
   let messages = $state<Message[]>([]);
   let inputValue = $state('');
@@ -105,12 +107,14 @@
   $effect(() => {
     fetch(`${baseUrl}/api/widget/config`)
       .then((r) => r.ok ? r.json() : null)
-      .then((cfg: { bgColor?: string; primaryColor?: string; title?: string; badgeLabel?: string; badgeUrl?: string } | null) => {
+      .then((cfg: { bgColor?: string; primaryColor?: string; title?: string; badgeLabel?: string; badgeUrl?: string; emptyText?: string; suggestedQuestions?: string[] } | null) => {
         if (cfg?.bgColor) bgColor = cfg.bgColor;
         if (cfg?.primaryColor) primaryColor = cfg.primaryColor;
         if (cfg?.title !== undefined) title = cfg.title;
         if (cfg?.badgeLabel !== undefined) badgeLabel = cfg.badgeLabel;
         if (cfg?.badgeUrl !== undefined) badgeUrl = cfg.badgeUrl;
+        if (cfg?.emptyText !== undefined) emptyText = cfg.emptyText;
+        if (Array.isArray(cfg?.suggestedQuestions)) suggestedQuestions = cfg.suggestedQuestions;
       })
       .catch(() => { /* silently use defaults */ });
   });
@@ -219,6 +223,11 @@
       sendMessage();
     }
   }
+
+  function askSuggestion(q: string) {
+    inputValue = q;
+    sendMessage();
+  }
 </script>
 
 <div class="cw" style={cssVars}>
@@ -242,7 +251,14 @@
         <svg class="cw-empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path stroke-linecap="round" stroke-linejoin="round" d="M8.625 12a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H8.25m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0H12m4.125 0a.375.375 0 11-.75 0 .375.375 0 01.75 0zm0 0h-.375M21 12c0 4.556-4.03 8.25-9 8.25a9.764 9.764 0 01-2.555-.337A5.972 5.972 0 015.41 20.97a5.969 5.969 0 01-.474-.065 4.48 4.48 0 00.978-2.025c.09-.457-.133-.901-.467-1.226C3.93 16.178 3 14.189 3 12c0-4.556 4.03-8.25 9-8.25s9 3.694 9 8.25z" />
         </svg>
-        <p>Ask anything about the knowledge base</p>
+        <p>{emptyText}</p>
+        {#if suggestedQuestions.length > 0}
+          <div class="cw-suggestions">
+            {#each suggestedQuestions as q}
+              <button class="cw-suggestion" onclick={() => askSuggestion(q)}>{q}</button>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
 
@@ -379,6 +395,22 @@
     filter: drop-shadow(0 0 10px rgba(var(--cw-primary-rgb, 99, 102, 241), 0.45));
   }
   .cw-empty p { font-size: 13px; line-height: 1.5; }
+
+  .cw-suggestions {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    justify-content: center; max-width: 320px; margin-top: 4px;
+  }
+  .cw-suggestion {
+    padding: 6px 14px; border-radius: 999px;
+    border: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.4);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.08);
+    color: var(--cw-primary, #818cf8); font-size: 12px; font-family: inherit;
+    cursor: pointer; transition: background 0.15s, border-color 0.15s; text-align: center; line-height: 1.4;
+  }
+  .cw-suggestion:hover {
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.18);
+    border-color: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.7);
+  }
 
   .cw-row { display: flex; align-items: flex-end; gap: 8px; }
   .cw-row--user { flex-direction: row-reverse; }

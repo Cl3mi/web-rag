@@ -3,7 +3,7 @@
   import { invalidateAll } from '$app/navigation';
 
   interface Props {
-    data: { bgColor: string; primaryColor: string; title: string; badgeLabel: string; badgeUrl: string };
+    data: { bgColor: string; primaryColor: string; title: string; badgeLabel: string; badgeUrl: string; emptyText: string; suggestedQuestions: string[] };
   }
   let { data }: Props = $props();
 
@@ -13,6 +13,9 @@
   let title = $state(data.title);
   let badgeLabel = $state(data.badgeLabel);
   let badgeUrl = $state(data.badgeUrl);
+  let emptyText = $state(data.emptyText);
+  let suggestedQuestions = $state<string[]>(data.suggestedQuestions);
+  let newQuestion = $state('');
   let saveStatus = $state<'idle' | 'saving' | 'saved'>('idle');
 
   // Debounced auto-save: skip the very first run (initial values from server)
@@ -23,6 +26,8 @@
     const t = title;
     const bl = badgeLabel;
     const bu = badgeUrl;
+    const et = emptyText;
+    const sq = suggestedQuestions.slice();
     if (firstRun) { firstRun = false; return; }
 
     saveStatus = 'saving';
@@ -30,7 +35,7 @@
       await fetch('/api/widget/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ bgColor: bg, primaryColor: primary, title: t, badgeLabel: bl, badgeUrl: bu }),
+        body: JSON.stringify({ bgColor: bg, primaryColor: primary, title: t, badgeLabel: bl, badgeUrl: bu, emptyText: et, suggestedQuestions: sq }),
       });
       saveStatus = 'saved';
       await invalidateAll();
@@ -39,6 +44,21 @@
 
     return () => clearTimeout(id);
   });
+
+  function addQuestion() {
+    const q = newQuestion.trim().slice(0, 200);
+    if (!q || suggestedQuestions.length >= 8) return;
+    suggestedQuestions.push(q);
+    newQuestion = '';
+  }
+
+  function removeQuestion(i: number) {
+    suggestedQuestions.splice(i, 1);
+  }
+
+  function handleQuestionKeydown(e: KeyboardEvent) {
+    if (e.key === 'Enter') { e.preventDefault(); addQuestion(); }
+  }
 
   const embedCode = $derived(
     `<script src="https://your-server.com/widget/chat-widget.iife.js"><\/script>\n<chat-widget api-url="https://your-server.com" title="Assistant"></chat-widget>`
@@ -58,6 +78,7 @@
     title = 'Assistant';
     badgeLabel = '';
     badgeUrl = '';
+    emptyText = 'Ask anything about the knowledge base';
   }
 </script>
 
@@ -98,7 +119,42 @@
             <label for="badge-url">Badge link</label>
             <input id="badge-url" class="text-input" type="url" bind:value={badgeUrl} placeholder="https://… (optional)" maxlength="500" />
           </div>
+          <div class="field-row">
+            <label for="empty-text">Empty state</label>
+            <input id="empty-text" class="text-input" type="text" bind:value={emptyText} placeholder="Ask anything about the knowledge base" maxlength="200" />
+          </div>
         </div>
+      </section>
+
+      <!-- Suggested Questions -->
+      <section class="card">
+        <h2>Suggested Questions</h2>
+        <p class="desc">Shown as clickable buttons in the empty chat window. Max 8 questions.</p>
+        <div class="suggestions-list">
+          {#each suggestedQuestions as q, i}
+            <div class="suggestion-row">
+              <span class="suggestion-text">{q}</span>
+              <button class="remove-btn" onclick={() => removeQuestion(i)} title="Remove">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          {/each}
+        </div>
+        {#if suggestedQuestions.length < 8}
+          <div class="add-question-row">
+            <input
+              class="text-input"
+              type="text"
+              bind:value={newQuestion}
+              onkeydown={handleQuestionKeydown}
+              placeholder="Type a question and press Enter…"
+              maxlength="200"
+            />
+            <button class="add-btn" onclick={addQuestion} disabled={!newQuestion.trim()}>Add</button>
+          </div>
+        {/if}
       </section>
 
       <!-- Appearance -->
@@ -154,7 +210,7 @@
     <div class="preview-col">
       <div class="preview-label">Live Preview</div>
       <div class="preview-container">
-        <ChatWidget {title} {bgColor} {primaryColor} {badgeLabel} {badgeUrl} />
+        <ChatWidget {title} {bgColor} {primaryColor} {badgeLabel} {badgeUrl} {emptyText} {suggestedQuestions} />
       </div>
     </div>
   </div>
@@ -381,6 +437,66 @@
   }
   .text-input::placeholder { color: #4a5568; }
   .text-input:focus { border-color: rgba(99, 102, 241, 0.5); }
+
+  /* Suggested questions */
+  .suggestions-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .suggestion-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 7px 10px;
+  }
+  .suggestion-text {
+    flex: 1;
+    font-size: 13px;
+    color: #cbd5e1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .remove-btn {
+    background: none;
+    border: none;
+    color: #475569;
+    cursor: pointer;
+    padding: 2px;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+    border-radius: 4px;
+    transition: color 0.15s;
+  }
+  .remove-btn:hover { color: #ef4444; }
+  .remove-btn svg { width: 13px; height: 13px; }
+  .add-question-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+  .add-btn {
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 6px;
+    color: #818cf8;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 6px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+    flex-shrink: 0;
+  }
+  .add-btn:hover:not(:disabled) { background: rgba(99, 102, 241, 0.28); }
+  .add-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
   @media (max-width: 900px) {
     .content { flex-direction: column; }

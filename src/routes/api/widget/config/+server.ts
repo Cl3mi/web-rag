@@ -18,6 +18,8 @@ const DEFAULTS = {
   title: 'Assistant',
   badgeLabel: '',
   badgeUrl: '',
+  emptyText: 'Ask anything about the knowledge base',
+  suggestedQuestions: [] as string[],
 };
 const HEX_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -39,16 +41,18 @@ export const GET: RequestHandler = async () => {
       title: cfg?.title ?? DEFAULTS.title,
       badgeLabel: cfg?.badgeLabel ?? DEFAULTS.badgeLabel,
       badgeUrl: cfg?.badgeUrl ?? DEFAULTS.badgeUrl,
+      emptyText: cfg?.emptyText ?? DEFAULTS.emptyText,
+      suggestedQuestions: (cfg?.suggestedQuestions ?? DEFAULTS.suggestedQuestions) as string[],
     },
     { headers: CORS }
   );
 };
 
 export const POST: RequestHandler = async ({ request }) => {
-  let body: { bgColor?: unknown; primaryColor?: unknown; title?: unknown; badgeLabel?: unknown; badgeUrl?: unknown };
+  let body: { bgColor?: unknown; primaryColor?: unknown; title?: unknown; badgeLabel?: unknown; badgeUrl?: unknown; emptyText?: unknown; suggestedQuestions?: unknown };
   try { body = await request.json(); } catch { return json({ error: 'Invalid JSON' }, { status: 400 }); }
 
-  const { bgColor, primaryColor, title, badgeLabel, badgeUrl } = body;
+  const { bgColor, primaryColor, title, badgeLabel, badgeUrl, emptyText, suggestedQuestions } = body;
   if (typeof bgColor !== 'string' || !HEX_RE.test(bgColor) ||
       typeof primaryColor !== 'string' || !HEX_RE.test(primaryColor)) {
     return json({ error: 'bgColor and primaryColor must be 6-digit hex strings' }, { status: 400 });
@@ -57,12 +61,19 @@ export const POST: RequestHandler = async ({ request }) => {
   const t  = typeof title      === 'string' ? title.slice(0, 100)      : DEFAULTS.title;
   const bl = typeof badgeLabel === 'string' ? badgeLabel.slice(0, 60)  : DEFAULTS.badgeLabel;
   const bu = typeof badgeUrl   === 'string' ? badgeUrl.slice(0, 500)   : DEFAULTS.badgeUrl;
+  const et = typeof emptyText  === 'string' ? emptyText.slice(0, 200)  : DEFAULTS.emptyText;
+  const sq: string[] = Array.isArray(suggestedQuestions)
+    ? (suggestedQuestions as unknown[])
+        .filter((q): q is string => typeof q === 'string' && q.trim().length > 0)
+        .slice(0, 8)
+        .map((q) => q.trim().slice(0, 200))
+    : DEFAULTS.suggestedQuestions;
 
   await db.insert(widgetConfig)
-    .values({ id: 1, bgColor, primaryColor, title: t, badgeLabel: bl, badgeUrl: bu })
+    .values({ id: 1, bgColor, primaryColor, title: t, badgeLabel: bl, badgeUrl: bu, emptyText: et, suggestedQuestions: sq })
     .onConflictDoUpdate({
       target: widgetConfig.id,
-      set: { bgColor, primaryColor, title: t, badgeLabel: bl, badgeUrl: bu },
+      set: { bgColor, primaryColor, title: t, badgeLabel: bl, badgeUrl: bu, emptyText: et, suggestedQuestions: sq },
     });
 
   return json({ ok: true }, { headers: CORS });

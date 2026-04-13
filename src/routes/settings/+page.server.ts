@@ -11,5 +11,7 @@ export const load: PageServerLoad = async () => {
     title: cfg?.title ?? 'Assistant',
     badgeLabel: cfg?.badgeLabel ?? '',
     badgeUrl: cfg?.badgeUrl ?? '',
+    emptyText: cfg?.emptyText ?? 'Ask anything about the knowledge base',
+    suggestedQuestions: (cfg?.suggestedQuestions ?? []) as string[],
   };
 };
