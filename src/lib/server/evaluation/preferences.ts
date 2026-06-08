@@ -6,6 +6,7 @@
  */
 
 import { sql } from '$lib/server/db/client';
+import { calculateWeightFromFailureType, getFailureTypeDistribution } from '$lib/server/chat/weights';
 
 /**
  * Populate preferences from judged evaluation data.
@@ -28,29 +29,46 @@ export async function populatePreferences(): Promise<{
   rejected: number;
   relabeled: number;
 }> {
+  // Pre-compute failure type distribution for weight calculation (shared across all rows)
+  const ftDistribution = await getFailureTypeDistribution();
+
   // --- Step 1: Re-label existing rows that are wrong under the current thresholds ---
   // Join rag_judge_results to use jr.judge_mean as the authoritative score (not the
   // stale quality_score stored at insertion time). Also sync quality_score so future
   // reads are consistent. Refusal rows repaired by repairRefusalScores() have
   // jr.judge_mean=0 and failure_type='retrieval_failure', so they will be un-chosen here.
-  const relabelResult = await sql`
-    UPDATE rag_preferences rp
-    SET
-      quality_score = jr.judge_mean,
-      chosen   = (jr.judge_mean >= 3.5 AND NOT rp.hallucination AND COALESCE(jr.failure_type, '') != 'retrieval_failure'),
-      rejected = (jr.judge_mean <  2.5 OR  rp.hallucination)
-    FROM rag_runs_evaluation re
+  const toRelabel = await sql`
+    SELECT rp.id, jr.judge_mean, rp.hallucination, jr.failure_type
+    FROM rag_preferences rp
+    JOIN rag_runs_evaluation re ON rp.evaluation_id = re.id
     JOIN rag_judge_results jr ON jr.evaluation_id = re.id
-    WHERE rp.evaluation_id = re.id
+    WHERE rp.source = 'llm_judge'
       AND (
         rp.quality_score IS DISTINCT FROM jr.judge_mean
         OR (rp.chosen = true  AND (jr.judge_mean < 3.5 OR rp.hallucination OR jr.failure_type = 'retrieval_failure'))
         OR (rp.rejected = true AND jr.judge_mean >= 2.5 AND NOT rp.hallucination AND COALESCE(jr.failure_type, '') != 'retrieval_failure')
         OR (rp.chosen = false AND rp.rejected = false AND jr.judge_mean >= 3.5 AND NOT rp.hallucination AND COALESCE(jr.failure_type, '') != 'retrieval_failure')
       )
-    RETURNING rp.id
   `;
-  const relabeled = relabelResult.length;
+
+  let relabeled = 0;
+  for (const row of toRelabel) {
+    const judgeM = Number(row.judge_mean);
+    const halluc = row.hallucination as boolean;
+    const ft = row.failure_type as string | null;
+    const chosen   = judgeM >= 3.5 && !halluc && ft !== 'retrieval_failure';
+    const rejected = judgeM <  2.5 || halluc;
+    const weight = calculateWeightFromFailureType(ft, ftDistribution);
+    await sql`
+      UPDATE rag_preferences
+      SET quality_score = ${judgeM},
+          chosen = ${chosen},
+          rejected = ${rejected},
+          training_weight = COALESCE(training_weight, ${weight})
+      WHERE id = ${row.id as string}
+    `;
+    relabeled++;
+  }
 
   // --- Step 2: Insert new rows not yet in preferences ---
   const judged = await sql`
@@ -83,12 +101,13 @@ export async function populatePreferences(): Promise<{
     // lacks the answer, but they provide no value as training positive examples.
     const chosen   = qualityScore >= 3.5 && !hallucination && failureType !== 'retrieval_failure';
     const rejected = qualityScore <  2.5 || hallucination;
+    const trainingWeight = calculateWeightFromFailureType(failureType, ftDistribution);
 
     await sql`
       INSERT INTO rag_preferences (
         question, context, answer,
         quality_score, hallucination, chosen, rejected,
-        source, evaluation_id
+        source, evaluation_id, training_weight
       ) VALUES (
         ${row.question as string},
         ${(row.retrieved_context as string).slice(0, 10000)},
@@ -98,7 +117,8 @@ export async function populatePreferences(): Promise<{
         ${chosen},
         ${rejected},
         'llm_judge',
-        ${row.evaluation_id as string}
+        ${row.evaluation_id as string},
+        ${trainingWeight}
       )
     `;
 
@@ -123,7 +143,7 @@ export async function exportTrainingData(options: {
   const whereClause = onlyChosen ? sql`WHERE chosen = true` : sql`WHERE 1=1`;
 
   const rows = await sql`
-    SELECT question, context, answer, quality_score
+    SELECT question, context, answer, quality_score, training_weight
     FROM rag_preferences
     ${whereClause}
     ORDER BY quality_score DESC NULLS LAST
@@ -133,6 +153,14 @@ export async function exportTrainingData(options: {
   const lines: string[] = [];
 
   for (const row of rows) {
+    const weight = row.training_weight !== null && row.training_weight !== undefined
+      ? Number(row.training_weight)
+      : 1.0;
+
+    // Oversample: round(weight) copies per row.
+    // weight=0.4 → 0 (excluded), 0.8-1.4 → 1x, 1.5-2.0 → 2x
+    const repeats = Math.max(0, Math.round(weight));
+
     const entry = {
       messages: [
         {
@@ -150,7 +178,10 @@ export async function exportTrainingData(options: {
       ],
     };
 
-    lines.push(JSON.stringify(entry));
+    const line = JSON.stringify(entry);
+    for (let i = 0; i < repeats; i++) {
+      lines.push(line);
+    }
   }
 
   return lines.join('\n');
@@ -197,6 +228,7 @@ export async function repairPreferenceLinks(): Promise<{ repaired: number; delet
 export async function getPreferenceSamples(options: {
   limit?: number;
   filter?: 'all' | 'chosen' | 'rejected';
+  pipeline?: string;
 } = {}): Promise<Array<{
   id: string;
   question: string;
@@ -208,37 +240,47 @@ export async function getPreferenceSamples(options: {
   source: string;
   pipelineName: string | null;
   failureType: string | null;
+  trainingWeight: number | null;
   createdAt: string;
 }>> {
-  const { limit = 50, filter = 'all' } = options;
+  const { limit = 50, filter = 'all', pipeline } = options;
 
-  const filterClause = filter === 'chosen'
-    ? sql`WHERE rp.chosen = true`
-    : filter === 'rejected'
-      ? sql`WHERE rp.rejected = true`
-      : sql`WHERE 1=1`;
+  const conditions: string[] = [];
+  const params: (string | number | boolean)[] = [];
+  let idx = 1;
 
-  const rows = await sql`
-    SELECT rp.id, rp.question, rp.answer, rp.quality_score, rp.hallucination,
-           rp.chosen, rp.rejected, rp.source, rp.created_at,
-           COALESCE(re.pipeline_name, (
-             SELECT re2.pipeline_name FROM rag_runs_evaluation re2
-             WHERE re2.question = rp.question
-             ORDER BY re2.created_at DESC LIMIT 1
-           )) as pipeline_name,
-           COALESCE(jr.failure_type, (
-             SELECT jr2.failure_type FROM rag_runs_evaluation re2
-             JOIN rag_judge_results jr2 ON jr2.evaluation_id = re2.id
-             WHERE re2.question = rp.question
-             ORDER BY re2.created_at DESC LIMIT 1
-           )) as failure_type
-    FROM rag_preferences rp
-    LEFT JOIN rag_runs_evaluation re ON rp.evaluation_id = re.id
-    LEFT JOIN rag_judge_results jr ON jr.evaluation_id = re.id
-    ${filterClause}
-    ORDER BY rp.created_at DESC
-    LIMIT ${limit}
-  `;
+  if (filter === 'chosen')   { conditions.push(`rp.chosen = true`); }
+  if (filter === 'rejected') { conditions.push(`rp.rejected = true`); }
+  if (pipeline && pipeline !== 'all') {
+    conditions.push(`COALESCE(re.pipeline_name, (SELECT re2.pipeline_name FROM rag_runs_evaluation re2 WHERE re2.question = rp.question ORDER BY re2.created_at DESC LIMIT 1)) = $${idx++}`);
+    params.push(pipeline);
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  params.push(limit);
+
+  const rows = await sql.unsafe(
+    `SELECT rp.id, rp.question, rp.answer, rp.quality_score, rp.hallucination,
+            rp.chosen, rp.rejected, rp.source, rp.training_weight, rp.created_at,
+            COALESCE(re.pipeline_name, (
+              SELECT re2.pipeline_name FROM rag_runs_evaluation re2
+              WHERE re2.question = rp.question
+              ORDER BY re2.created_at DESC LIMIT 1
+            )) as pipeline_name,
+            COALESCE(jr.failure_type, (
+              SELECT jr2.failure_type FROM rag_runs_evaluation re2
+              JOIN rag_judge_results jr2 ON jr2.evaluation_id = re2.id
+              WHERE re2.question = rp.question
+              ORDER BY re2.created_at DESC LIMIT 1
+            )) as failure_type
+     FROM rag_preferences rp
+     LEFT JOIN rag_runs_evaluation re ON rp.evaluation_id = re.id
+     LEFT JOIN rag_judge_results jr ON jr.evaluation_id = re.id
+     ${where}
+     ORDER BY rp.created_at DESC
+     LIMIT $${idx}`,
+    params as (string | number)[]
+  );
 
   return rows.map(r => ({
     id: r.id as string,
@@ -251,6 +293,9 @@ export async function getPreferenceSamples(options: {
     source: r.source as string,
     pipelineName: (r.pipeline_name as string | null) || null,
     failureType: (r.failure_type as string | null) || null,
+    trainingWeight: r.training_weight !== null && r.training_weight !== undefined
+      ? Number(r.training_weight)
+      : null,
     createdAt: new Date(r.created_at).toISOString(),
   }));
 }
@@ -295,4 +340,49 @@ export async function getPreferenceStats(): Promise<{
     avgQualityScore: Number(stats[0].avg_quality_score) || 0,
     bySource,
   };
+}
+
+/**
+ * Delete preference rows by pipeline or source.
+ *
+ * `targets` is an array containing any mix of:
+ *   - 'chunk' | 'fact' | 'llm'  → deletes llm_judge rows for that pipeline
+ *   - 'user'                     → deletes user-sourced rows (from chat feedback)
+ *
+ * Returns the number of deleted rows.
+ */
+export async function deletePreferencesByPipeline(
+  targets: string[]
+): Promise<{ deleted: number }> {
+  if (targets.length === 0) return { deleted: 0 };
+
+  const pipelineTargets = targets.filter(t => ['chunk', 'fact', 'llm'].includes(t));
+  const includeUser = targets.includes('user');
+
+  let total = 0;
+
+  // Delete llm_judge rows that belong to any of the selected pipelines
+  if (pipelineTargets.length > 0) {
+    const result = await sql`
+      DELETE FROM rag_preferences rp
+      WHERE rp.source = 'llm_judge'
+        AND EXISTS (
+          SELECT 1 FROM rag_runs_evaluation re
+          WHERE re.id = rp.evaluation_id
+            AND re.pipeline_name = ANY(${pipelineTargets}::text[])
+        )
+      RETURNING rp.id
+    `;
+    total += result.length;
+  }
+
+  // Delete user-sourced rows
+  if (includeUser) {
+    const result = await sql`
+      DELETE FROM rag_preferences WHERE source = 'user' RETURNING id
+    `;
+    total += result.length;
+  }
+
+  return { deleted: total };
 }

@@ -19,9 +19,10 @@ export const POST: RequestHandler = async ({ request }) => {
       judgeModel,
       maxRows = 200,
       judgeRuns = 3,
+      pipelines,
     } = body;
 
-    const result = await runJudge({ batchSize, judgeModel, maxRows, judgeRuns });
+    const result = await runJudge({ batchSize, judgeModel, maxRows, judgeRuns, pipelines });
 
     // Repair any NULL failure_types (from rows missing recall_at_k)
     const repair = await repairFailureTypes();

@@ -108,6 +108,7 @@
   let runName = $state('');
   let topK = $state(10);
   let useRerank = $state(true);
+  let evalPipelines = $state(new Set(['chunk', 'fact', 'llm']));
   let isRunning = $state(false);
   let runError = $state('');
 
@@ -264,6 +265,7 @@
           name: runName || null,
           topK,
           rerank: useRerank,
+          pipelines: [...evalPipelines],
         }),
       });
 
@@ -837,12 +839,30 @@
           </label>
         </div>
 
-        <button class="btn btn-primary" onclick={runEvaluation} disabled={isRunning || testQueries.length === 0}>
+        <div class="pipeline-select-row">
+          <span class="label-text">Pipelines</span>
+          {#each ['chunk', 'fact', 'llm'] as p}
+            <label class="pipeline-checkbox-label pipeline-{p}">
+              <input
+                type="checkbox"
+                checked={evalPipelines.has(p)}
+                onchange={() => {
+                  const next = new Set(evalPipelines);
+                  if (next.has(p)) next.delete(p); else next.add(p);
+                  evalPipelines = next;
+                }}
+              />
+              {p}
+            </label>
+          {/each}
+        </div>
+
+        <button class="btn btn-primary" onclick={runEvaluation} disabled={isRunning || testQueries.length === 0 || evalPipelines.size === 0}>
           {#if isRunning}
             <span class="spinner-small"></span>
-            Running all pipelines...
+            Running {[...evalPipelines].join(', ')}...
           {:else}
-            Run Evaluation (All Pipelines)
+            Run Evaluation ({evalPipelines.size === 3 ? 'All Pipelines' : [...evalPipelines].join(', ')})
           {/if}
         </button>
 
@@ -1290,6 +1310,30 @@
     color: #ccc;
     font-size: 0.9rem;
   }
+
+  .pipeline-select-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .pipeline-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    cursor: pointer;
+    border: 1px solid #333;
+    color: #ccc;
+    transition: border-color 0.15s, color 0.15s;
+  }
+
+  .pipeline-checkbox-label:has(input:checked).pipeline-chunk { border-color: #6366f1; color: #818cf8; }
+  .pipeline-checkbox-label:has(input:checked).pipeline-fact  { border-color: #10b981; color: #34d399; }
+  .pipeline-checkbox-label:has(input:checked).pipeline-llm   { border-color: #f59e0b; color: #fbbf24; }
 
   .error-text {
     color: #dc3545;

@@ -391,13 +391,19 @@ export async function runJudge(options: {
   judgeModel?: string;
   maxRows?: number;
   judgeRuns?: number;
+  pipelines?: string[];
 } = {}): Promise<{ judged: number; failed: number; total: number }> {
   const {
     batchSize = 20,
     judgeModel = DEFAULT_JUDGE_MODEL,
     maxRows = 200,
     judgeRuns = 3,
+    pipelines,
   } = options;
+
+  const pipelineFilter = pipelines && pipelines.length > 0
+    ? sql`AND re.pipeline_name = ANY(${pipelines}::text[])`
+    : sql``;
 
   // Select unjudged rows (include retrieved_doc_ids and query_id for recall computation)
   const unjudged = await sql`
@@ -407,6 +413,7 @@ export async function runJudge(options: {
     LEFT JOIN rag_judge_results jr ON jr.evaluation_id = re.id
     WHERE jr.id IS NULL
       AND re.generated_answer NOT LIKE '[Generation failed%'
+      ${pipelineFilter}
     ORDER BY re.created_at ASC
     LIMIT ${maxRows}
   ` as UnjudgedRow[];

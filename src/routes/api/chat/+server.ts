@@ -11,6 +11,7 @@ import { hybridSearch } from '$lib/server/pipeline/traditional/retriever';
 import { searchFacts } from '$lib/server/pipeline/facts/retriever';
 import { searchLLMChunks } from '$lib/server/pipeline/llm/retriever';
 import { generate, listModels, DEFAULT_MODEL, ACTIVE_PROVIDER, LLMError } from '$lib/server/llm/client';
+import { createSession, saveMessage } from '$lib/server/chat/conversations';
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
@@ -20,6 +21,7 @@ export const POST: RequestHandler = async ({ request }) => {
       pipeline = 'chunk',
       model = DEFAULT_MODEL,
       topK = 5,
+      sessionId = null,
     } = body;
 
     if (!message || typeof message !== 'string') {
@@ -66,15 +68,47 @@ export const POST: RequestHandler = async ({ request }) => {
 
     // If no context found, respond accordingly
     if (context.length === 0) {
-      return json({
-        response: "I don't have any relevant information in my knowledge base to answer this question. Please try crawling some documents first.",
-        sources: [],
-        pipeline,
-        model,
-        latencyMs: Math.round(performance.now() - startTime),
-        retrievalTimeMs: Math.round(retrievalTime),
-        generationTimeMs: 0,
-      });
+      const noContextResponse = "I don't have any relevant information in my knowledge base to answer this question. Please try crawling some documents first.";
+      const latencyMs = Math.round(performance.now() - startTime);
+
+      // Ensure session exists, then save the empty-context exchange
+      let activeSessionId = sessionId as string | null;
+      try {
+        if (!activeSessionId) {
+          activeSessionId = await createSession(pipeline, model);
+        }
+        const conversationId = await saveMessage({
+          sessionId: activeSessionId,
+          question: message,
+          answer: noContextResponse,
+          context: [],
+          sources: [],
+          pipeline,
+          model,
+          latencyMs,
+        });
+        return json({
+          response: noContextResponse,
+          sources: [],
+          pipeline,
+          model,
+          latencyMs,
+          retrievalTimeMs: Math.round(retrievalTime),
+          generationTimeMs: 0,
+          sessionId: activeSessionId,
+          conversationId,
+        });
+      } catch {
+        return json({
+          response: noContextResponse,
+          sources: [],
+          pipeline,
+          model,
+          latencyMs,
+          retrievalTimeMs: Math.round(retrievalTime),
+          generationTimeMs: 0,
+        });
+      }
     }
 
     // Build prompt with context
@@ -117,15 +151,40 @@ export const POST: RequestHandler = async ({ request }) => {
 
     const generationTime = performance.now() - generationStart;
     const totalTime = performance.now() - startTime;
+    const latencyMs = Math.round(totalTime);
+
+    // Persist the conversation
+    let activeSessionId = sessionId as string | null;
+    let conversationId: string | undefined;
+    try {
+      if (!activeSessionId) {
+        activeSessionId = await createSession(pipeline, model);
+      }
+      conversationId = await saveMessage({
+        sessionId: activeSessionId,
+        question: message,
+        answer: response,
+        context,
+        sources,
+        pipeline,
+        model,
+        latencyMs,
+      });
+    } catch (err) {
+      console.error('Failed to persist chat message:', err);
+      // Non-fatal — still return the response to the user
+    }
 
     return json({
       response,
       sources,
       pipeline,
       model,
-      latencyMs: Math.round(totalTime),
+      latencyMs,
       retrievalTimeMs: Math.round(retrievalTime),
       generationTimeMs: Math.round(generationTime),
+      sessionId: activeSessionId,
+      conversationId,
     });
   } catch (error) {
     console.error('Chat error:', error);

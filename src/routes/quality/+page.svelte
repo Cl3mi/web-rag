@@ -52,6 +52,7 @@
     source: string;
     pipelineName: string | null;
     failureType: string | null;
+    trainingWeight: number | null;
     createdAt: string;
   }
 
@@ -89,6 +90,18 @@
   let loading = $state(true);
   let error = $state('');
   let prefFilter = $state<'all' | 'chosen' | 'rejected'>('all');
+  let prefPipelineFilter = $state('all');
+  let deletePipelineTargets = $state(new Set<string>());
+  let deleteRunning = $state(false);
+  let deleteResult = $state('');
+
+  // Preference edit state
+  let editingPref = $state<PreferenceSample | null>(null);
+  let editPrefQuestion = $state('');
+  let editPrefAnswer = $state('');
+  let editPrefWeight = $state('1.0');
+  let editPrefSaving = $state(false);
+  let deletingPrefId = $state<string | null>(null);
 
   // Failure detail drill-down
   let failureDetails = $state<JudgeDetailRow[]>([]);
@@ -100,6 +113,7 @@
 
   // Judge configuration
   let judgeRuns = $state(3);
+  let judgePipelines = $state(new Set(['chunk', 'fact', 'llm']));
 
   // Operation states
   let judgeRunning = $state(false);
@@ -205,7 +219,8 @@
 
   async function loadPreferenceSamples() {
     try {
-      const res = await fetch(`/api/preferences?filter=${prefFilter}`);
+      const params = new URLSearchParams({ filter: prefFilter, pipeline: prefPipelineFilter });
+      const res = await fetch(`/api/preferences?${params}`);
       if (res.ok) {
         const data = await res.json();
         preferenceStats = data.stats || null;
@@ -291,7 +306,7 @@
       const res = await fetch('/api/judge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ batchSize: 20, judgeRuns }),
+        body: JSON.stringify({ batchSize: 20, judgeRuns, pipelines: [...judgePipelines] }),
       });
       const data = await res.json();
       if (res.ok) {
@@ -383,6 +398,80 @@
       }
     } catch (e) {
       console.error('Activate model error:', e);
+    }
+  }
+
+  async function deletePreferencesByPipeline() {
+    if (deletePipelineTargets.size === 0) return;
+    const targets = [...deletePipelineTargets];
+    const label = targets.join(', ');
+    if (!confirm(`Delete ALL preference entries for: ${label}?\n\nThis cannot be undone.`)) return;
+
+    deleteRunning = true;
+    deleteResult = '';
+    try {
+      const res = await fetch('/api/preferences', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pipelines: targets }),
+      });
+      const data = await res.json();
+      if (res.ok) {
+        deleteResult = `Deleted ${data.deleted} entries for: ${label}`;
+        deletePipelineTargets = new Set();
+        await loadData();
+      } else {
+        deleteResult = `Error: ${data.error}`;
+      }
+    } catch (e) {
+      deleteResult = `Error: ${e instanceof Error ? e.message : 'Unknown error'}`;
+    } finally {
+      deleteRunning = false;
+    }
+  }
+
+  function startEditPref(sample: PreferenceSample) {
+    editingPref = sample;
+    editPrefQuestion = sample.question;
+    editPrefAnswer = sample.answer;
+    editPrefWeight = (sample.trainingWeight ?? 1.0).toFixed(1);
+  }
+
+  async function saveEditPref() {
+    if (!editingPref) return;
+    editPrefSaving = true;
+    try {
+      const res = await fetch(`/api/preferences/${editingPref.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question: editPrefQuestion,
+          answer: editPrefAnswer,
+          trainingWeight: parseFloat(editPrefWeight) || 1.0,
+        }),
+      });
+      if (res.ok) {
+        editingPref = null;
+        await loadPreferenceSamples();
+      }
+    } catch (e) {
+      console.error('Save pref error:', e);
+    } finally {
+      editPrefSaving = false;
+    }
+  }
+
+  async function deletePref(id: string) {
+    deletingPrefId = id;
+    try {
+      const res = await fetch(`/api/preferences/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        await loadPreferenceSamples();
+      }
+    } catch (e) {
+      console.error('Delete pref error:', e);
+    } finally {
+      deletingPrefId = null;
     }
   }
 
@@ -804,6 +893,35 @@
           </div>
         </div>
 
+        <!-- Bulk delete by pipeline -->
+        <div class="pref-delete-zone">
+          <span class="pref-delete-label">Delete by pipeline:</span>
+          {#each ['chunk', 'fact', 'llm', 'user'] as p}
+            <label class="pipeline-checkbox-label pipeline-{p}">
+              <input
+                type="checkbox"
+                checked={deletePipelineTargets.has(p)}
+                onchange={() => {
+                  const next = new Set(deletePipelineTargets);
+                  if (next.has(p)) next.delete(p); else next.add(p);
+                  deletePipelineTargets = next;
+                }}
+              />
+              {p}
+            </label>
+          {/each}
+          <button
+            class="btn btn-danger btn-sm"
+            onclick={deletePreferencesByPipeline}
+            disabled={deleteRunning || deletePipelineTargets.size === 0}
+          >
+            {#if deleteRunning}Deleting...{:else}Delete Selected{/if}
+          </button>
+          {#if deleteResult}
+            <span class="delete-result">{deleteResult}</span>
+          {/if}
+        </div>
+
         <!-- Filter tabs and sample table -->
         <div class="pref-samples-section">
           <div class="pref-filter-row">
@@ -817,6 +935,15 @@
                 >{f.charAt(0).toUpperCase() + f.slice(1)}</button>
               {/each}
             </div>
+            <div class="filter-tabs">
+              {#each ['all', 'chunk', 'fact', 'llm'] as p}
+                <button
+                  class="filter-tab"
+                  class:active={prefPipelineFilter === p}
+                  onclick={() => { prefPipelineFilter = p; loadPreferenceSamples(); }}
+                >{p === 'all' ? 'All Pipelines' : p}</button>
+              {/each}
+            </div>
           </div>
 
           {#if preferenceSamples.length > 0}
@@ -828,8 +955,10 @@
                     <th class="col-question">Question</th>
                     <th>Answer (preview)</th>
                     <th>Quality</th>
+                    <th>Weight</th>
                     <th>Label</th>
                     <th>Failure Type</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -854,6 +983,15 @@
                           <span class="halluc-tag">H</span>
                         {/if}
                       </td>
+                      <td class="sample-weight">
+                        {#if sample.trainingWeight !== null}
+                          <span class="weight-badge" class:weight-high={sample.trainingWeight >= 1.5} class:weight-low={sample.trainingWeight < 0.6}>
+                            {sample.trainingWeight.toFixed(1)}
+                          </span>
+                        {:else}
+                          <span class="weight-badge">-</span>
+                        {/if}
+                      </td>
                       <td>
                         {#if sample.chosen}
                           <span class="label-badge chosen">Chosen</span>
@@ -869,6 +1007,15 @@
                         {:else}
                           <span class="ft-badge ft-unclassified">-</span>
                         {/if}
+                      </td>
+                      <td class="pref-actions">
+                        <button class="btn-icon btn-edit" onclick={() => startEditPref(sample)} title="Edit">✏️</button>
+                        <button
+                          class="btn-icon btn-delete"
+                          onclick={() => deletePref(sample.id)}
+                          disabled={deletingPrefId === sample.id}
+                          title="Delete"
+                        >🗑</button>
                       </td>
                     </tr>
                   {/each}
@@ -946,11 +1093,28 @@
             />
             <span class="runs-hint">(mean of {judgeRuns} {judgeRuns === 1 ? 'run' : 'runs'})</span>
           </div>
-          <button class="btn btn-primary" onclick={runJudge} disabled={judgeRunning}>
+          <div class="pipeline-select-row">
+            <span class="runs-label">Pipelines</span>
+            {#each ['chunk', 'fact', 'llm'] as p}
+              <label class="pipeline-checkbox-label pipeline-{p}">
+                <input
+                  type="checkbox"
+                  checked={judgePipelines.has(p)}
+                  onchange={() => {
+                    const next = new Set(judgePipelines);
+                    if (next.has(p)) next.delete(p); else next.add(p);
+                    judgePipelines = next;
+                  }}
+                />
+                {p}
+              </label>
+            {/each}
+          </div>
+          <button class="btn btn-primary" onclick={runJudge} disabled={judgeRunning || judgePipelines.size === 0}>
             {#if judgeRunning}
               <span class="spinner-small"></span> Judging...
             {:else}
-              Run Judge
+              Run Judge ({judgePipelines.size === 3 ? 'All' : [...judgePipelines].join(', ')})
             {/if}
           </button>
           {#if judgeResult}
@@ -1012,6 +1176,45 @@
     </section>
   {/if}
 </div>
+
+<!-- Edit preference modal -->
+{#if editingPref}
+  <div class="modal-overlay" onclick={() => editingPref = null}>
+    <div class="modal" onclick={(e) => e.stopPropagation()}>
+      <div class="modal-header">
+        <h3>Edit Preference Sample</h3>
+        <button class="modal-close" onclick={() => editingPref = null}>✕</button>
+      </div>
+      <div class="modal-body">
+        <label class="field-label">Question</label>
+        <textarea class="field-textarea" rows={3} bind:value={editPrefQuestion}></textarea>
+
+        <label class="field-label">Answer</label>
+        <textarea class="field-textarea" rows={6} bind:value={editPrefAnswer}></textarea>
+
+        <label class="field-label">Training Weight (0.3–2.0)</label>
+        <div class="weight-row">
+          <input
+            type="range" min={0.3} max={2.0} step={0.1}
+            bind:value={editPrefWeight}
+            class="weight-slider"
+          />
+          <input
+            type="number" min={0.3} max={2.0} step={0.1}
+            bind:value={editPrefWeight}
+            class="weight-number"
+          />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick={() => editingPref = null}>Cancel</button>
+        <button class="btn btn-primary" onclick={saveEditPref} disabled={editPrefSaving}>
+          {#if editPrefSaving}Saving...{:else}Save{/if}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .quality-page {
@@ -1832,5 +2035,253 @@
     font-size: 0.7rem;
     margin-left: 4px;
     font-weight: 500;
+  }
+
+  /* Pipeline selector (judge controls + evaluate page) */
+  .pipeline-select-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+  }
+
+  .pipeline-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    border: 1px solid #333;
+    color: #aaa;
+    transition: border-color 0.15s, color 0.15s;
+    user-select: none;
+  }
+
+  .pipeline-checkbox-label:has(input:checked).pipeline-chunk { border-color: #6366f1; color: #818cf8; }
+  .pipeline-checkbox-label:has(input:checked).pipeline-fact  { border-color: #10b981; color: #34d399; }
+  .pipeline-checkbox-label:has(input:checked).pipeline-llm   { border-color: #f59e0b; color: #fbbf24; }
+
+  .pref-filter-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .pref-delete-zone {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border: 1px solid #3a1a1a;
+    border-radius: 8px;
+    background: rgba(239, 68, 68, 0.04);
+    margin-bottom: 16px;
+  }
+
+  .pref-delete-label {
+    font-size: 0.8rem;
+    color: #888;
+    white-space: nowrap;
+  }
+
+  .btn-danger {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .btn-danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.25);
+  }
+
+  .btn-danger:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .delete-result {
+    font-size: 0.8rem;
+    color: #aaa;
+  }
+
+  /* pipeline-user color for the user-sourced checkbox */
+  .pipeline-checkbox-label:has(input:checked).pipeline-user {
+    border-color: #ec4899;
+    color: #f472b6;
+  }
+
+  /* Preference table: weight + actions */
+  .sample-weight {
+    text-align: center;
+  }
+
+  .weight-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    background: #2a2a2a;
+    color: #aaa;
+  }
+
+  .weight-badge.weight-high {
+    background: rgba(99, 102, 241, 0.2);
+    color: #818cf8;
+  }
+
+  .weight-badge.weight-low {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+  }
+
+  .pref-actions {
+    white-space: nowrap;
+    display: flex;
+    gap: 4px;
+  }
+
+  .btn-icon {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    transition: background 0.15s;
+  }
+
+  .btn-icon:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+
+  .btn-icon:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  /* Edit modal */
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    z-index: 2000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .modal {
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 12px;
+    width: min(700px, 92vw);
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid #333;
+  }
+
+  .modal-header h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: #fff;
+  }
+
+  .modal-close {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 4px 8px;
+    border-radius: 4px;
+  }
+
+  .modal-close:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .field-label {
+    font-size: 0.8rem;
+    color: #aaa;
+    display: block;
+    margin-bottom: 4px;
+  }
+
+  .field-textarea {
+    width: 100%;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #e0e0e0;
+    padding: 8px 10px;
+    font-size: 0.85rem;
+    resize: vertical;
+    font-family: inherit;
+  }
+
+  .field-textarea:focus {
+    outline: none;
+    border-color: #6366f1;
+  }
+
+  .weight-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .weight-slider {
+    flex: 1;
+    accent-color: #6366f1;
+  }
+
+  .weight-number {
+    width: 70px;
+    background: #2a2a2a;
+    border: 1px solid #444;
+    border-radius: 6px;
+    color: #e0e0e0;
+    padding: 4px 8px;
+    font-size: 0.85rem;
+    text-align: center;
+  }
+
+  .weight-number:focus {
+    outline: none;
+    border-color: #6366f1;
+  }
+
+  .modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 20px;
+    border-top: 1px solid #333;
   }
 </style>

@@ -14,7 +14,22 @@
     sources?: Source[];
     streaming: boolean;
     error: boolean;
+    // Persistence & feedback
+    conversationId?: string;
+    rating?: 'up' | 'down' | null;
+    ratingCategory?: string | null;
+    ratingStep?: 'none' | 'category' | 'freetext' | 'done';
+    ratingFreetext?: string;
   }
+
+  const RATING_CATEGORIES = [
+    { value: 'hallucination', label: 'Hallucination' },
+    { value: 'incomplete',    label: 'Incomplete' },
+    { value: 'irrelevant',    label: 'Irrelevant' },
+    { value: 'misleading',   label: 'Misleading' },
+    { value: 'off_topic',    label: 'Off-topic' },
+    { value: 'other',        label: 'Other' },
+  ];
 
   let {
     apiUrl = '',
@@ -98,6 +113,7 @@
   let isLoading = $state(false);
   let messagesEl: HTMLElement | undefined = $state();
   let textareaEl: HTMLTextAreaElement | undefined = $state();
+  let sessionId = $state<string | null>(null);
 
   const baseUrl = $derived(apiUrl.replace(/\/$/, ''));
 
@@ -146,7 +162,7 @@
       const response = await fetch(`${baseUrl}/api/chat/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({ message: text, sessionId }),
       });
 
       if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
@@ -178,6 +194,11 @@
             messages[idx].sources = event.sources as Source[];
           } else if (event.type === 'token') {
             messages[idx].content += event.token as string;
+          } else if (event.type === 'saved') {
+            messages[idx].conversationId = event.conversationId as string;
+            messages[idx].rating = null;
+            messages[idx].ratingStep = 'none';
+            if (event.sessionId) sessionId = event.sessionId as string;
           } else if (event.type === 'done') {
             messages[idx].streaming = false;
             isLoading = false;
@@ -198,6 +219,80 @@
       }
     } finally {
       isLoading = false;
+    }
+  }
+
+  async function submitRating(msgId: string, rating: 'up' | 'down') {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx === -1) return;
+    const msg = messages[idx];
+    if (!msg.conversationId) return;
+
+    if (msg.rating === rating) {
+      messages[idx] = { ...messages[idx], rating: null, ratingStep: 'none', ratingCategory: null, ratingFreetext: '' };
+      await fetch(`${baseUrl}/api/chat/feedback`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: msg.conversationId }),
+      });
+      return;
+    }
+
+    messages[idx] = { ...messages[idx], rating, ratingStep: rating === 'down' ? 'category' : 'done', ratingCategory: null, ratingFreetext: '' };
+    await fetch(`${baseUrl}/api/chat/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: msg.conversationId, rating }),
+    });
+  }
+
+  async function submitCategory(msgId: string, category: string) {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx === -1) return;
+    const msg = messages[idx];
+    if (!msg.conversationId) return;
+
+    messages[idx] = { ...messages[idx], ratingCategory: category, ratingStep: 'freetext' };
+    await fetch(`${baseUrl}/api/chat/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: msg.conversationId, rating: msg.rating, category }),
+    });
+  }
+
+  async function submitFreetext(msgId: string) {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx === -1) return;
+    const msg = messages[idx];
+    if (!msg.conversationId) return;
+
+    const freetext = (msg.ratingFreetext ?? '').trim();
+    messages[idx] = { ...messages[idx], ratingStep: 'done' };
+    if (freetext) {
+      await fetch(`${baseUrl}/api/chat/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: msg.conversationId, rating: msg.rating, category: msg.ratingCategory, freetext }),
+      });
+    }
+  }
+
+  function discardFeedbackStep(msgId: string) {
+    const idx = messages.findIndex((m) => m.id === msgId);
+    if (idx === -1) return;
+    const msg = messages[idx];
+    const step = msg.ratingStep;
+    if (step === 'category') {
+      messages[idx] = { ...messages[idx], rating: null, ratingStep: 'none', ratingCategory: null, ratingFreetext: '' };
+      if (msg.conversationId) {
+        fetch(`${baseUrl}/api/chat/feedback`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversationId: msg.conversationId }),
+        });
+      }
+    } else if (step === 'freetext') {
+      messages[idx] = { ...messages[idx], ratingStep: 'done', ratingFreetext: '' };
     }
   }
 
@@ -276,6 +371,69 @@
                 {/if}
               {/each}
             </div>
+          {/if}
+
+          <!-- Feedback UI (only on persisted, non-streaming bot messages) -->
+          {#if msg.role === 'bot' && !msg.streaming && !msg.error && msg.conversationId}
+            <div class="cw-feedback">
+              <button
+                class="cw-thumb"
+                class:cw-thumb--active={msg.rating === 'up'}
+                title="Good answer"
+                onclick={() => submitRating(msg.id, 'up')}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M1 8.5a1.5 1.5 0 113 0v4.5a1.5 1.5 0 01-3 0V8.5zM5 8v4.43a1 1 0 00.553.894l.025.013A3 3 0 006.943 14h4.057a1 1 0 00.981-.804l.9-4.5A1 1 0 0011.9 7.5H9.5V3a1 1 0 00-1-1 .5.5 0 00-.5.5v.167A3 3 0 017.6 4.567L5.8 7.2A2 2 0 005 8z"/></svg>
+              </button>
+              <button
+                class="cw-thumb"
+                class:cw-thumb--active={msg.rating === 'down'}
+                title="Bad answer"
+                onclick={() => submitRating(msg.id, 'down')}
+              >
+                <svg viewBox="0 0 16 16" fill="currentColor" width="12" height="12"><path d="M15 7.5a1.5 1.5 0 11-3 0V3a1.5 1.5 0 013 0v4.5zM11 8V3.57a1 1 0 00-.553-.894l-.025-.013A3 3 0 009.057 2H5a1 1 0 00-.981.804l-.9 4.5A1 1 0 004.1 8.5H6.5V13a1 1 0 001 1 .5.5 0 00.5-.5v-.167a3 3 0 01.4-1.4L10.2 8.8A2 2 0 0011 8z"/></svg>
+              </button>
+              {#if msg.rating === 'up' && msg.ratingStep === 'done'}
+                <span class="cw-feedback-saved">Saved</span>
+              {/if}
+            </div>
+
+            <!-- Step 1: Category (after thumbs down) -->
+            {#if msg.ratingStep === 'category'}
+              <div class="cw-feedback-step">
+                <span class="cw-feedback-label">What was wrong?</span>
+                <div class="cw-cats">
+                  {#each RATING_CATEGORIES as cat}
+                    <button class="cw-cat" onclick={() => submitCategory(msg.id, cat.value)}>{cat.label}</button>
+                  {/each}
+                </div>
+                <button class="cw-discard" onclick={() => discardFeedbackStep(msg.id)}>Discard</button>
+              </div>
+            {/if}
+
+            <!-- Step 2: Freetext -->
+            {#if msg.ratingStep === 'freetext'}
+              <div class="cw-feedback-step">
+                <span class="cw-feedback-label">Add details (optional)</span>
+                <textarea
+                  class="cw-feedback-textarea"
+                  placeholder="Describe the issue…"
+                  rows="2"
+                  bind:value={messages[messages.findIndex(m => m.id === msg.id)].ratingFreetext}
+                ></textarea>
+                <div class="cw-feedback-actions">
+                  <button class="cw-feedback-submit" onclick={() => submitFreetext(msg.id)}>Submit</button>
+                  <button class="cw-discard" onclick={() => discardFeedbackStep(msg.id)}>Discard</button>
+                </div>
+              </div>
+            {/if}
+
+            <!-- Done: category badge -->
+            {#if msg.ratingStep === 'done' && msg.rating === 'down' && msg.ratingCategory}
+              <div class="cw-feedback-done">
+                <span class="cw-cat-badge">{RATING_CATEGORIES.find(c => c.value === msg.ratingCategory)?.label ?? msg.ratingCategory}</span>
+                <button class="cw-discard" onclick={() => { const i = messages.findIndex(m => m.id === msg.id); if (i >= 0) messages[i] = { ...messages[i], ratingStep: 'category' }; }}>Edit</button>
+              </div>
+            {/if}
           {/if}
         </div>
 
@@ -620,5 +778,155 @@
   @keyframes cw-rotate {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
+  }
+
+  /* ── Feedback ───────────────────────────────────────────────────── */
+  .cw-feedback {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-top: 8px;
+    padding-top: 7px;
+    border-top: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.12);
+  }
+
+  .cw-thumb {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 5px;
+    border: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.2);
+    background: transparent;
+    color: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.4);
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .cw-thumb:hover {
+    color: var(--cw-primary, #6366f1);
+    border-color: var(--cw-primary, #6366f1);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.1);
+  }
+  .cw-thumb--active {
+    color: var(--cw-primary, #6366f1);
+    border-color: var(--cw-primary, #6366f1);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.15);
+  }
+
+  .cw-feedback-saved {
+    font-size: 10px;
+    color: var(--cw-primary, #6366f1);
+    opacity: 0.8;
+    margin-left: 2px;
+  }
+
+  .cw-feedback-step {
+    margin-top: 6px;
+    padding: 8px 10px;
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.05);
+    border: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.15);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .cw-feedback-label {
+    font-size: 10px;
+    color: var(--cw-text-muted, #94a3b8);
+  }
+
+  .cw-cats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .cw-cat {
+    padding: 3px 8px;
+    border-radius: 4px;
+    border: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.25);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.06);
+    color: var(--cw-text-muted, #94a3b8);
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: border-color 0.1s, color 0.1s, background 0.1s;
+  }
+  .cw-cat:hover {
+    border-color: var(--cw-primary, #6366f1);
+    color: var(--cw-primary, #6366f1);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.12);
+  }
+
+  .cw-discard {
+    background: none;
+    border: none;
+    color: var(--cw-text-faint, #4a5568);
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+    align-self: flex-start;
+    transition: color 0.1s;
+  }
+  .cw-discard:hover { color: var(--cw-text-muted, #94a3b8); }
+
+  .cw-feedback-textarea {
+    width: 100%;
+    background: rgba(0, 0, 0, 0.2);
+    border: 1px solid rgba(var(--cw-primary-rgb, 99, 102, 241), 0.2);
+    border-radius: 6px;
+    color: var(--cw-text, #e2e8f0);
+    font-size: 11px;
+    font-family: inherit;
+    padding: 5px 7px;
+    resize: none;
+    line-height: 1.4;
+    box-sizing: border-box;
+  }
+  .cw-feedback-textarea:focus {
+    outline: none;
+    border-color: var(--cw-primary, #6366f1);
+  }
+
+  .cw-feedback-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .cw-feedback-submit {
+    padding: 3px 10px;
+    border-radius: 5px;
+    border: 1px solid var(--cw-primary, #6366f1);
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.2);
+    color: var(--cw-primary, #818cf8);
+    font-size: 10px;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  .cw-feedback-submit:hover {
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.35);
+  }
+
+  .cw-feedback-done {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+  }
+
+  .cw-cat-badge {
+    font-size: 10px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    background: rgba(var(--cw-primary-rgb, 99, 102, 241), 0.15);
+    color: var(--cw-primary, #818cf8);
   }
 </style>

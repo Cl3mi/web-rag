@@ -150,7 +150,15 @@ export const POST: RequestHandler = async ({ request }) => {
       rerankThreshold = 0.3,
       generateAnswers = true,
       model = DEFAULT_MODEL,
+      pipelines: selectedPipelines,
     } = body;
+
+    const ALL_PIPELINES = ['chunk', 'fact', 'llm'] as const;
+    const activePipelines = new Set<string>(
+      Array.isArray(selectedPipelines) && selectedPipelines.length > 0
+        ? selectedPipelines.filter((p: string) => (ALL_PIPELINES as readonly string[]).includes(p))
+        : ALL_PIPELINES
+    );
 
     // Get test queries with expected document IDs
     const testQueries = await sql`
@@ -172,7 +180,7 @@ export const POST: RequestHandler = async ({ request }) => {
     // Create evaluation run
     const runResult = await sql`
       INSERT INTO evaluation_runs (name, pipeline, config, status)
-      VALUES (${name || null}, 'all', ${JSON.stringify(config)}, 'running')
+      VALUES (${name || null}, ${[...activePipelines].join(',')}, ${JSON.stringify(config)}, 'running')
       RETURNING id
     `;
     const runId = runResult[0].id as string;
@@ -219,42 +227,44 @@ export const POST: RequestHandler = async ({ request }) => {
         }
       }
 
-      // Run all three pipelines in parallel with error isolation
-      const safePipelineRun = (name: string, fn: () => Promise<SearchResult[]>) =>
+      // Run selected pipelines in parallel with error isolation
+      type PipelineRun = { result: SearchResult[]; latencyMs: number };
+      const safePipelineRun = (pName: string, fn: () => Promise<SearchResult[]>): Promise<PipelineRun> =>
         measureLatency(async () => {
           try {
             return await fn();
           } catch (error) {
-            console.error(`${name} pipeline failed for query "${query}":`, error);
+            console.error(`${pName} pipeline failed for query "${query}":`, error);
             return [] as SearchResult[];
           }
         });
+      const skipPipeline: PipelineRun = { result: [], latencyMs: 0 };
 
       const [chunkResult, factResult, llmResult] = await Promise.all([
-        safePipelineRun('chunk', async () => {
-          let results = await hybridSearch(query, { topK: topK * 2 });
-          if (shouldRerank) {
-            results = await rerank(query, results, { topK, threshold: rerankThreshold });
-          }
-          return results.slice(0, topK);
-        }),
-        safePipelineRun('fact', async () => {
-          // Facts are sentence-level and far more granular than chunks.
-          // A 4× pool gives vector search a better chance of surfacing facts
-          // that cover all sub-parts of the answer, not just the top-ranked sentence.
-          let results = await searchFacts(query, { topK: topK * 4 });
-          if (shouldRerank) {
-            results = await rerank(query, results, { topK, threshold: rerankThreshold });
-          }
-          return results.slice(0, topK);
-        }),
-        safePipelineRun('llm', async () => {
-          let results = await searchLLMChunks(query, { topK: topK * 2 });
-          if (shouldRerank) {
-            results = await rerank(query, results, { topK, threshold: rerankThreshold });
-          }
-          return results.slice(0, topK);
-        }),
+        activePipelines.has('chunk')
+          ? safePipelineRun('chunk', async () => {
+              let results = await hybridSearch(query, { topK: topK * 2 });
+              if (shouldRerank) results = await rerank(query, results, { topK, threshold: rerankThreshold });
+              return results.slice(0, topK);
+            })
+          : Promise.resolve(skipPipeline),
+        activePipelines.has('fact')
+          ? safePipelineRun('fact', async () => {
+              // Facts are sentence-level and far more granular than chunks.
+              // A 4× pool gives vector search a better chance of surfacing facts
+              // that cover all sub-parts of the answer, not just the top-ranked sentence.
+              let results = await searchFacts(query, { topK: topK * 4 });
+              if (shouldRerank) results = await rerank(query, results, { topK, threshold: rerankThreshold });
+              return results.slice(0, topK);
+            })
+          : Promise.resolve(skipPipeline),
+        activePipelines.has('llm')
+          ? safePipelineRun('llm', async () => {
+              let results = await searchLLMChunks(query, { topK: topK * 2 });
+              if (shouldRerank) results = await rerank(query, results, { topK, threshold: rerankThreshold });
+              return results.slice(0, topK);
+            })
+          : Promise.resolve(skipPipeline),
       ]);
 
       // Get unique retrieved document IDs (deduplicate - multiple chunks can be from same doc)
@@ -262,85 +272,76 @@ export const POST: RequestHandler = async ({ request }) => {
       const factRetrievedIds = [...new Set(factResult.result.map(r => r.documentId))];
       const llmRetrievedIds = [...new Set(llmResult.result.map(r => r.documentId))];
 
-      // Calculate IR metrics for each pipeline
-      const chunkQueryMetrics = calculateIRMetrics(chunkRetrievedIds, expectedDocIds, topK);
-      const factQueryMetrics = calculateIRMetrics(factRetrievedIds, expectedDocIds, topK);
-      const llmQueryMetrics = calculateIRMetrics(llmRetrievedIds, expectedDocIds, topK);
+      // Calculate IR metrics only for active pipelines
+      const chunkQueryMetrics = activePipelines.has('chunk') ? calculateIRMetrics(chunkRetrievedIds, expectedDocIds, topK) : null;
+      const factQueryMetrics  = activePipelines.has('fact')  ? calculateIRMetrics(factRetrievedIds,  expectedDocIds, topK) : null;
+      const llmQueryMetrics   = activePipelines.has('llm')   ? calculateIRMetrics(llmRetrievedIds,   expectedDocIds, topK) : null;
 
-      // Track for aggregation
-      chunkMetrics.push(chunkQueryMetrics);
-      factMetrics.push(factQueryMetrics);
-      llmMetrics.push(llmQueryMetrics);
+      // Track for aggregation (only active pipelines)
+      if (chunkQueryMetrics) chunkMetrics.push(chunkQueryMetrics);
+      if (factQueryMetrics)  factMetrics.push(factQueryMetrics);
+      if (llmQueryMetrics)   llmMetrics.push(llmQueryMetrics);
 
-      // Calculate overlaps (Jaccard similarity on chunk IDs)
+      // Calculate overlaps (Jaccard similarity) — only when both pipelines are active
       const overlap = {
-        chunkFact: calculateOverlap(chunkResult.result, factResult.result),
-        chunkLlm: calculateOverlap(chunkResult.result, llmResult.result),
-        factLlm: calculateOverlap(factResult.result, llmResult.result),
+        chunkFact: (activePipelines.has('chunk') && activePipelines.has('fact'))
+          ? calculateOverlap(chunkResult.result, factResult.result) : 0,
+        chunkLlm:  (activePipelines.has('chunk') && activePipelines.has('llm'))
+          ? calculateOverlap(chunkResult.result, llmResult.result) : 0,
+        factLlm:   (activePipelines.has('fact')  && activePipelines.has('llm'))
+          ? calculateOverlap(factResult.result, llmResult.result) : 0,
       };
 
-      // Calculate document coverage
-      const chunkCoverage = calculateDocumentCoverage(chunkResult.result, expectedDocIds);
-      const factCoverage = calculateDocumentCoverage(factResult.result, expectedDocIds);
-      const llmCoverage = calculateDocumentCoverage(llmResult.result, expectedDocIds);
+      // Calculate document coverage + diversity + compression (only for active pipelines)
+      if (activePipelines.has('chunk')) {
+        chunkCoverages.push(calculateDocumentCoverage(chunkResult.result, expectedDocIds));
+        chunkDiversities.push(calculateSourceDiversity(chunkResult.result, topK));
+        chunkLatencies.push(chunkResult.latencyMs);
+        const s = chunkResult.result.reduce((sum, r) => sum + r.score, 0);
+        if (chunkResult.result.length > 0) chunkScores.push(s / chunkResult.result.length);
+      }
+      if (activePipelines.has('fact')) {
+        factCoverages.push(calculateDocumentCoverage(factResult.result, expectedDocIds));
+        factDiversities.push(calculateSourceDiversity(factResult.result, topK));
+        factCompressions.push(calculateFactCompressionRatio(factResult.result));
+        factLatencies.push(factResult.latencyMs);
+        const s = factResult.result.reduce((sum, r) => sum + r.score, 0);
+        if (factResult.result.length > 0) factScores.push(s / factResult.result.length);
+      }
+      if (activePipelines.has('llm')) {
+        llmCoverages.push(calculateDocumentCoverage(llmResult.result, expectedDocIds));
+        llmDiversities.push(calculateSourceDiversity(llmResult.result, topK));
+        llmCompressions.push(calculateLLMCompressionRatio(llmResult.result));
+        llmLatencies.push(llmResult.latencyMs);
+        const s = llmResult.result.reduce((sum, r) => sum + r.score, 0);
+        if (llmResult.result.length > 0) llmScores.push(s / llmResult.result.length);
+      }
 
-      // Calculate source diversity
-      const chunkDiversity = calculateSourceDiversity(chunkResult.result, topK);
-      const factDiversity = calculateSourceDiversity(factResult.result, topK);
-      const llmDiversity = calculateSourceDiversity(llmResult.result, topK);
-
-      // Calculate compression (fact and llm only)
-      const factCompression = calculateFactCompressionRatio(factResult.result);
-      const llmCompression = calculateLLMCompressionRatio(llmResult.result);
-
-      // Calculate embedding similarity (async)
+      // Calculate embedding similarity — only when both pipelines are active
       const [embChunkFact, embChunkLlm, embFactLlm] = await Promise.all([
-        calculateEmbeddingSimilarity(chunkResult.result, factResult.result),
-        calculateEmbeddingSimilarity(chunkResult.result, llmResult.result),
-        calculateEmbeddingSimilarity(factResult.result, llmResult.result),
+        (activePipelines.has('chunk') && activePipelines.has('fact'))
+          ? calculateEmbeddingSimilarity(chunkResult.result, factResult.result) : Promise.resolve(0),
+        (activePipelines.has('chunk') && activePipelines.has('llm'))
+          ? calculateEmbeddingSimilarity(chunkResult.result, llmResult.result) : Promise.resolve(0),
+        (activePipelines.has('fact')  && activePipelines.has('llm'))
+          ? calculateEmbeddingSimilarity(factResult.result, llmResult.result)  : Promise.resolve(0),
       ]);
-
-      // Track all new metrics
-      chunkDiversities.push(chunkDiversity);
-      factDiversities.push(factDiversity);
-      llmDiversities.push(llmDiversity);
-      chunkCoverages.push(chunkCoverage);
-      factCoverages.push(factCoverage);
-      llmCoverages.push(llmCoverage);
-      factCompressions.push(factCompression);
-      llmCompressions.push(llmCompression);
       embeddingOverlaps.push({ chunkFact: embChunkFact, chunkLlm: embChunkLlm, factLlm: embFactLlm });
 
-      // Calculate average scores
-      const avgChunkScore = chunkResult.result.length > 0
-        ? chunkResult.result.reduce((sum, r) => sum + r.score, 0) / chunkResult.result.length
-        : 0;
-      const avgFactScore = factResult.result.length > 0
-        ? factResult.result.reduce((sum, r) => sum + r.score, 0) / factResult.result.length
-        : 0;
-      const avgLlmScore = llmResult.result.length > 0
-        ? llmResult.result.reduce((sum, r) => sum + r.score, 0) / llmResult.result.length
-        : 0;
-
-      // Track latencies and scores
-      chunkLatencies.push(chunkResult.latencyMs);
-      factLatencies.push(factResult.latencyMs);
-      llmLatencies.push(llmResult.latencyMs);
-
-      if (chunkResult.result.length > 0) chunkScores.push(avgChunkScore);
-      if (factResult.result.length > 0) factScores.push(avgFactScore);
-      if (llmResult.result.length > 0) llmScores.push(avgLlmScore);
+      const avgChunkScore = chunkScores.at(-1) ?? 0;
+      const avgFactScore  = factScores.at(-1) ?? 0;
+      const avgLlmScore   = llmScores.at(-1) ?? 0;
 
       comparisons.push({
         query,
         expectedDocumentIds: expectedDocIds,
-        chunk: { results: chunkResult.result, latencyMs: chunkResult.latencyMs, avgScore: avgChunkScore, metrics: chunkQueryMetrics },
-        fact: { results: factResult.result, latencyMs: factResult.latencyMs, avgScore: avgFactScore, metrics: factQueryMetrics },
-        llm: { results: llmResult.result, latencyMs: llmResult.latencyMs, avgScore: avgLlmScore, metrics: llmQueryMetrics },
+        ...(activePipelines.has('chunk') && chunkQueryMetrics ? { chunk: { results: chunkResult.result, latencyMs: chunkResult.latencyMs, avgScore: avgChunkScore, metrics: chunkQueryMetrics } } : {}),
+        ...(activePipelines.has('fact')  && factQueryMetrics  ? { fact:  { results: factResult.result,  latencyMs: factResult.latencyMs,  avgScore: avgFactScore,  metrics: factQueryMetrics  } } : {}),
+        ...(activePipelines.has('llm')   && llmQueryMetrics   ? { llm:   { results: llmResult.result,   latencyMs: llmResult.latencyMs,   avgScore: avgLlmScore,   metrics: llmQueryMetrics   } } : {}),
         overlap,
       });
 
-      // Store results for each pipeline with full metrics
+      // Store results for each active pipeline with full metrics
       const storeResult = async (pipeline: string, result: { result: SearchResult[]; latencyMs: number }, metrics: QueryMetrics) => {
         await sql`
           INSERT INTO evaluation_results (run_id, query_id, pipeline, retrieved_ids, scores, metrics, latency_ms)
@@ -357,20 +358,20 @@ export const POST: RequestHandler = async ({ request }) => {
       };
 
       await Promise.all([
-        storeResult('chunk', chunkResult, chunkQueryMetrics),
-        storeResult('fact', factResult, factQueryMetrics),
-        storeResult('llm', llmResult, llmQueryMetrics),
+        ...(activePipelines.has('chunk') && chunkQueryMetrics ? [storeResult('chunk', chunkResult, chunkQueryMetrics)] : []),
+        ...(activePipelines.has('fact')  && factQueryMetrics  ? [storeResult('fact',  factResult,  factQueryMetrics)]  : []),
+        ...(activePipelines.has('llm')   && llmQueryMetrics   ? [storeResult('llm',   llmResult,   llmQueryMetrics)]   : []),
       ]);
 
-      // Generate answers and log to rag_runs_evaluation
+      // Generate answers and log to rag_runs_evaluation (only active pipelines)
       if (generateAnswers) {
-        const pipelines = [
-          { name: 'chunk' as const, result: chunkResult, metrics: chunkQueryMetrics, ids: chunkRetrievedIds },
-          { name: 'fact' as const, result: factResult, metrics: factQueryMetrics, ids: factRetrievedIds },
-          { name: 'llm' as const, result: llmResult, metrics: llmQueryMetrics, ids: llmRetrievedIds },
-        ];
+        const activePipelineRuns = [
+          activePipelines.has('chunk') && chunkQueryMetrics ? { name: 'chunk' as const, result: chunkResult, metrics: chunkQueryMetrics, ids: chunkRetrievedIds } : null,
+          activePipelines.has('fact')  && factQueryMetrics  ? { name: 'fact'  as const, result: factResult,  metrics: factQueryMetrics,  ids: factRetrievedIds  } : null,
+          activePipelines.has('llm')   && llmQueryMetrics   ? { name: 'llm'   as const, result: llmResult,   metrics: llmQueryMetrics,   ids: llmRetrievedIds   } : null,
+        ].filter((p): p is NonNullable<typeof p> => p !== null);
 
-        for (const p of pipelines) {
+        for (const p of activePipelineRuns) {
           // For the fact pipeline, sort retrieved facts by (documentId, factIndex) before
           // assembling context. Score-order interleaves facts from different documents,
           // producing an incoherent mosaic. Grouping by document and sequential position
@@ -448,10 +449,10 @@ export const POST: RequestHandler = async ({ request }) => {
       latencyStats: calculateLatencyStats(latencies),
     });
 
-    const aggregatedMetrics = {
-      chunk: aggregatePipelineMetrics(chunkMetrics, chunkLatencies, chunkScores, chunkDiversities, chunkCoverages),
-      fact: aggregatePipelineMetrics(factMetrics, factLatencies, factScores, factDiversities, factCoverages, factCompressions),
-      llm: aggregatePipelineMetrics(llmMetrics, llmLatencies, llmScores, llmDiversities, llmCoverages, llmCompressions),
+    const aggregatedMetrics: Record<string, unknown> = {
+      ...(activePipelines.has('chunk') && chunkMetrics.length > 0 ? { chunk: aggregatePipelineMetrics(chunkMetrics, chunkLatencies, chunkScores, chunkDiversities, chunkCoverages) } : {}),
+      ...(activePipelines.has('fact')  && factMetrics.length  > 0 ? { fact:  aggregatePipelineMetrics(factMetrics,  factLatencies,  factScores,  factDiversities,  factCoverages,  factCompressions) } : {}),
+      ...(activePipelines.has('llm')   && llmMetrics.length   > 0 ? { llm:   aggregatePipelineMetrics(llmMetrics,   llmLatencies,   llmScores,   llmDiversities,   llmCoverages,   llmCompressions) }  : {}),
       overlap: {
         avgChunkFact: avg(comparisons.map(c => c.overlap.chunkFact)),
         avgChunkLlm: avg(comparisons.map(c => c.overlap.chunkLlm)),

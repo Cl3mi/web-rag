@@ -9,6 +9,7 @@
 import type { RequestHandler } from './$types';
 import { hybridSearch } from '$lib/server/pipeline/traditional/retriever';
 import { generateStream, DEFAULT_MODEL, LLMError } from '$lib/server/llm/client';
+import { createSession, saveMessage } from '$lib/server/chat/conversations';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -32,11 +33,16 @@ export const POST: RequestHandler = async ({ request }) => {
     return new Response(JSON.stringify({ error: 'message is required' }), { status: 400 });
   }
   const topK = typeof body.topK === 'number' ? body.topK : 5;
+  const incomingSessionId = typeof (body as { sessionId?: unknown }).sessionId === 'string'
+    ? (body as { sessionId: string }).sessionId
+    : null;
 
   const encoder = new TextEncoder();
   const send = (controller: ReadableStreamDefaultController, data: object) => {
     controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
   };
+
+  const startTime = performance.now();
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -49,14 +55,31 @@ export const POST: RequestHandler = async ({ request }) => {
           url: r.sourceUrl ?? null,
           content: r.content.slice(0, 200) + (r.content.length > 200 ? '…' : ''),
         }));
+        const context = results.map((r) => r.content);
 
         send(controller, { type: 'sources', sources });
 
         if (results.length === 0) {
-          send(controller, {
-            type: 'token',
-            token: "I don't have relevant information to answer this question. Try crawling some documents first.",
-          });
+          const noCtxAnswer = "I don't have relevant information to answer this question. Try crawling some documents first.";
+          send(controller, { type: 'token', token: noCtxAnswer });
+
+          // Persist even the no-context response
+          try {
+            let sessionId = incomingSessionId;
+            if (!sessionId) sessionId = await createSession('chunk', DEFAULT_MODEL);
+            const conversationId = await saveMessage({
+              sessionId,
+              question: message,
+              answer: noCtxAnswer,
+              context: [],
+              sources: [],
+              pipeline: 'chunk',
+              model: DEFAULT_MODEL,
+              latencyMs: Math.round(performance.now() - startTime),
+            });
+            send(controller, { type: 'saved', conversationId, sessionId });
+          } catch { /* non-fatal */ }
+
           send(controller, { type: 'done' });
           controller.close();
           return;
@@ -68,6 +91,8 @@ export const POST: RequestHandler = async ({ request }) => {
 Context:
 ${contextText}`;
 
+        // Collect tokens while streaming so we can persist the full answer
+        let fullAnswer = '';
         try {
           for await (const token of generateStream({
             model: DEFAULT_MODEL,
@@ -77,6 +102,7 @@ ${contextText}`;
             topP: 0.9,
             maxTokens: 1024,
           })) {
+            fullAnswer += token;
             send(controller, { type: 'token', token });
           }
         } catch (err) {
@@ -87,6 +113,23 @@ ${contextText}`;
           controller.close();
           return;
         }
+
+        // Persist the completed conversation before signalling done
+        try {
+          let sessionId = incomingSessionId;
+          if (!sessionId) sessionId = await createSession('chunk', DEFAULT_MODEL);
+          const conversationId = await saveMessage({
+            sessionId,
+            question: message,
+            answer: fullAnswer,
+            context,
+            sources,
+            pipeline: 'chunk',
+            model: DEFAULT_MODEL,
+            latencyMs: Math.round(performance.now() - startTime),
+          });
+          send(controller, { type: 'saved', conversationId, sessionId });
+        } catch { /* non-fatal — don't block the response */ }
 
         send(controller, { type: 'done' });
         controller.close();

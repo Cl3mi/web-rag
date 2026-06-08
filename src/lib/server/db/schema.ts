@@ -273,6 +273,9 @@ export const ragPreferences = pgTable(
     source: varchar('source', { length: 20 }).$type<'llm_judge' | 'user'>().notNull().default('llm_judge'),
     evaluationId: uuid('evaluation_id')
       .references(() => ragRunsEvaluation.id, { onDelete: 'set null' }),
+    chatMessageId: uuid('chat_message_id')
+      .references(() => chatMessages.id, { onDelete: 'set null' }),
+    trainingWeight: real('training_weight'),
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
   },
   (table) => [
@@ -329,6 +332,58 @@ export type NewRagPreference = typeof ragPreferences.$inferInsert;
 
 export type RagModel = typeof ragModels.$inferSelect;
 export type NewRagModel = typeof ragModels.$inferInsert;
+
+// Chat sessions — groups Q&A pairs from the same browser session
+export const chatSessions = pgTable('chat_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  pipeline: varchar('pipeline', { length: 20 }).$type<'chunk' | 'fact' | 'llm'>().notNull(),
+  model: text('model').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+});
+
+// Chat messages — one row per Q&A pair (with optional user feedback)
+export const chatMessages = pgTable(
+  'chat_messages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    sessionId: uuid('session_id').references(() => chatSessions.id, { onDelete: 'set null' }),
+    question: text('question').notNull(),
+    answer: text('answer').notNull(),
+    context: jsonb('context').$type<string[]>().notNull().default([]),
+    sources: jsonb('sources').$type<Array<{ title: string | null; url: string | null; content: string }>>().notNull().default([]),
+    pipeline: varchar('pipeline', { length: 20 }).$type<'chunk' | 'fact' | 'llm'>().notNull(),
+    model: text('model').notNull(),
+    latencyMs: real('latency_ms').notNull(),
+
+    // Optional user feedback
+    rating: varchar('rating', { length: 10 }).$type<'up' | 'down'>(),
+    ratingCategory: varchar('rating_category', { length: 30 }).$type<
+      'hallucination' | 'incomplete' | 'irrelevant' | 'misleading' | 'off_topic' | 'other'
+    >(),
+    ratingFreetext: text('rating_freetext'),
+    ratingCreatedAt: timestamp('rating_created_at', { withTimezone: true }),
+
+    // Review workflow
+    reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+
+    // Training weight (auto-calculated, human-overridable, clipped to [0.3, 2.0])
+    trainingWeight: real('training_weight'),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => [
+    index('chat_messages_session_idx').on(table.sessionId),
+    index('chat_messages_pipeline_idx').on(table.pipeline),
+    index('chat_messages_rating_idx').on(table.rating),
+    index('chat_messages_reviewed_idx').on(table.reviewedAt),
+    index('chat_messages_created_at_idx').on(table.createdAt),
+  ]
+);
+
+export type ChatSession = typeof chatSessions.$inferSelect;
+export type NewChatSession = typeof chatSessions.$inferInsert;
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type NewChatMessage = typeof chatMessages.$inferInsert;
 
 // Widget configuration — single-row table (id always = 1)
 export const widgetConfig = pgTable('widget_config', {

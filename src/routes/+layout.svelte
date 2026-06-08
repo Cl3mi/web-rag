@@ -32,7 +32,8 @@
     { href: '/knowledge', label: 'Knowledge', icon: '📚' },
     { href: '/evaluate', label: 'Evaluate', icon: '📈' },
     { href: '/quality', label: 'Quality', icon: '🎯' },
-    { href: '/settings', label: 'Widget', icon: '💬' },
+    { href: '/conversations', label: 'Conversations', icon: '💬' },
+    { href: '/settings', label: 'Widget', icon: '⚙️' },
   ];
 
   // Floating widget is shown on all pages except /settings (where it's embedded in-page)
