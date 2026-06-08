@@ -50,11 +50,19 @@ export const POST: RequestHandler = async ({ request }) => {
         // Retrieve context with chunk pipeline
         const results = await hybridSearch(message, { topK, minScore: 0.1 });
 
-        const sources = results.map((r) => ({
+        const rawSources = results.map((r) => ({
           title: r.sourceTitle ?? null,
           url: r.sourceUrl ?? null,
           content: r.content.slice(0, 200) + (r.content.length > 200 ? '…' : ''),
         }));
+        const seenSourceKeys = new Set<string>();
+        const sources: typeof rawSources = [];
+        for (const s of rawSources) {
+          const key = s.url || s.title || s.content;
+          if (!key || seenSourceKeys.has(key)) continue;
+          seenSourceKeys.add(key);
+          sources.push(s);
+        }
         const context = results.map((r) => r.content);
 
         send(controller, { type: 'sources', sources });

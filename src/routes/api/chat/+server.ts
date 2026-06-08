@@ -13,6 +13,20 @@ import { searchLLMChunks } from '$lib/server/pipeline/llm/retriever';
 import { generate, listModels, DEFAULT_MODEL, ACTIVE_PROVIDER, LLMError } from '$lib/server/llm/client';
 import { createSession, saveMessage } from '$lib/server/chat/conversations';
 
+type Source = { title: string | null; url: string | null; content: string };
+
+function dedupeSources(sources: Source[]): Source[] {
+  const seen = new Set<string>();
+  const out: Source[] = [];
+  for (const s of sources) {
+    const key = s.url || s.title || s.content;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const body = await request.json();
@@ -41,27 +55,27 @@ export const POST: RequestHandler = async ({ request }) => {
     if (pipeline === 'chunk') {
       const results = await hybridSearch(message, { topK, minScore: 0.3 });
       context = results.map((r) => r.content);
-      sources = results.map((r) => ({
+      sources = dedupeSources(results.map((r) => ({
         title: r.sourceTitle || null,
         url: r.sourceUrl || null,
         content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
-      }));
+      })));
     } else if (pipeline === 'llm') {
       const results = await searchLLMChunks(message, { topK, minScore: 0.3 });
       context = results.map((r) => r.content);
-      sources = results.map((r) => ({
+      sources = dedupeSources(results.map((r) => ({
         title: r.sourceTitle || null,
         url: r.sourceUrl || null,
         content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
-      }));
+      })));
     } else {
       const results = await searchFacts(message, { topK, minScore: 0.3 });
       context = results.map((r) => r.content);
-      sources = results.map((r) => ({
+      sources = dedupeSources(results.map((r) => ({
         title: r.sourceTitle || null,
         url: r.sourceUrl || null,
         content: r.content.slice(0, 200) + (r.content.length > 200 ? '...' : ''),
-      }));
+      })));
     }
 
     const retrievalTime = performance.now() - startTime;
