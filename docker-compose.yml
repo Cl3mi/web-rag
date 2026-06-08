@@ -16,9 +16,30 @@ services:
       timeout: 5s
       retries: 5
 
+  # Frontend (SvelteKit, adapter-node).
+  # Start with: docker compose --profile web up
+  # Reads .env; DATABASE_HOST and OLLAMA_URL are overridden to use in-network hostnames.
+  web:
+    profiles: ["web"]
+    build:
+      context: .
+    container_name: web-rag-web
+    ports:
+      - "5173:3000"
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      OLLAMA_URL: http://ollama:11434
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # Ollama CPU. Optional — only needed when LLM_PROVIDER=ollama.
+  # Start with: docker compose --profile ollama up
   ollama:
     image: ollama/ollama:latest
     container_name: web-rag-ollama
+    profiles: ["ollama"]
     ports:
       - "11434:11434"
     volumes:
@@ -34,7 +55,8 @@ services:
       retries: 10
       start_period: 300s
 
-  # Ollama with NVIDIA GPU support (use: docker compose --profile gpu up ollama-gpu)
+  # Ollama with NVIDIA GPU support.
+  # Start with: docker compose --profile gpu up
   ollama-gpu:
     image: ollama/ollama:latest
     container_name: web-rag-ollama-gpu

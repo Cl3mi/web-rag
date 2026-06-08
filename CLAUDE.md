@@ -18,9 +18,16 @@ bun run db:generate  # Generate migration files from schema changes
 bun run db:studio    # Open Drizzle Studio in browser
 
 # Infrastructure
-docker compose up postgres ollama            # Start DB + Ollama (CPU)
-docker compose --profile gpu up ollama-gpu   # Start Ollama with NVIDIA GPU
+docker compose up                                 # Postgres only (remote LLM/embeddings)
+docker compose --profile web up                   # + frontend container on :5173
+docker compose --profile ollama up                # + Ollama (CPU)
+docker compose --profile gpu up                   # + Ollama (NVIDIA GPU)
+docker compose --profile web --profile ollama up  # Everything self-contained (no remote API)
 ```
+
+Frontend Dockerfile builds with Bun, runs SvelteKit `adapter-node` output on Node 20.
+The `web` service inherits `.env` and overrides `DATABASE_HOST=postgres` /
+`OLLAMA_URL=http://ollama:11434` so it works inside the compose network.
 
 ### Environment variables (`.env`)
 ```
