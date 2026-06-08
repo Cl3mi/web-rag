@@ -25,7 +25,7 @@ services:
       context: .
     container_name: web-rag-web
     ports:
-      - "5173:3000"
+      - "3030:3000"
     env_file: .env
     environment:
       DATABASE_HOST: postgres
