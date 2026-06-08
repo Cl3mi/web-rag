@@ -5,7 +5,7 @@ FROM oven/bun:1 AS build
 WORKDIR /app
 
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile
+RUN bun install --no-progress
 
 COPY . .
 RUN bun run build
@@ -14,7 +14,7 @@ RUN bun run build
 FROM oven/bun:1 AS deps
 WORKDIR /app
 COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
+RUN bun install --no-progress --production
 
 # ── Runtime stage: minimal Node image running the adapter-node bundle ─────────
 FROM node:20-slim AS runtime
