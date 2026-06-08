@@ -10,6 +10,7 @@ import type { RequestHandler } from './$types';
 import { hybridSearch } from '$lib/server/pipeline/traditional/retriever';
 import { generateStream, DEFAULT_MODEL, LLMError } from '$lib/server/llm/client';
 import { createSession, saveMessage } from '$lib/server/chat/conversations';
+import { buildContextText, buildSystemPrompt } from '$lib/server/chat/prompt';
 
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
@@ -68,7 +69,7 @@ export const POST: RequestHandler = async ({ request }) => {
         send(controller, { type: 'sources', sources });
 
         if (results.length === 0) {
-          const noCtxAnswer = "I don't have relevant information to answer this question. Try crawling some documents first.";
+          const noCtxAnswer = 'Zu dieser Frage liegen mir leider keine passenden Informationen vor. Bitte wende dich für nähere Auskünfte direkt an das Unternehmen.';
           send(controller, { type: 'token', token: noCtxAnswer });
 
           // Persist even the no-context response
@@ -93,11 +94,7 @@ export const POST: RequestHandler = async ({ request }) => {
           return;
         }
 
-        const contextText = results.map((c, i) => `[${i + 1}] ${c.content}`).join('\n\n');
-        const systemPrompt = `You are a helpful assistant that answers questions based on the provided context. Give thorough, well-structured answers. Use markdown formatting where appropriate.
-
-Context:
-${contextText}`;
+        const systemPrompt = buildSystemPrompt(buildContextText(context));
 
         // Collect tokens while streaming so we can persist the full answer
         let fullAnswer = '';
