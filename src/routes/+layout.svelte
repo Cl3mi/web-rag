@@ -6,7 +6,7 @@
 
   interface Props {
     children: import('svelte').Snippet;
-    data: { widgetBgColor: string; widgetPrimaryColor: string; widgetTitle: string; widgetBadgeLabel: string; widgetBadgeUrl: string; widgetClosed: boolean };
+    data: { widgetBgColor: string; widgetPrimaryColor: string; widgetTitle: string; widgetBadgeLabel: string; widgetBadgeUrl: string; widgetEmptyText: string; widgetSuggestedQuestions: string[]; widgetClosed: boolean };
   }
 
   let { children, data }: Props = $props();
@@ -76,7 +76,7 @@
   <div class="chat-float">
     {#if expanded}
       <div class="chat-float-panel">
-        <ChatWidget bgColor={data.widgetBgColor} primaryColor={data.widgetPrimaryColor} title={data.widgetTitle} badgeLabel={data.widgetBadgeLabel} badgeUrl={data.widgetBadgeUrl} />
+        <ChatWidget bgColor={data.widgetBgColor} primaryColor={data.widgetPrimaryColor} title={data.widgetTitle} badgeLabel={data.widgetBadgeLabel} badgeUrl={data.widgetBadgeUrl} emptyText={data.widgetEmptyText} suggestedQuestions={data.widgetSuggestedQuestions} />
       </div>
     {/if}
 

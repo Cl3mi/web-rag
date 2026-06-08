@@ -11,6 +11,8 @@ export const load: LayoutServerLoad = async ({ cookies }) => {
     widgetTitle: cfg?.title ?? 'Assistant',
     widgetBadgeLabel: cfg?.badgeLabel ?? '',
     widgetBadgeUrl: cfg?.badgeUrl ?? '',
+    widgetEmptyText: cfg?.emptyText ?? 'Ask anything about the knowledge base',
+    widgetSuggestedQuestions: (cfg?.suggestedQuestions ?? []) as string[],
     widgetClosed: cookies.get('cw_closed') === '1',
   };
 };
