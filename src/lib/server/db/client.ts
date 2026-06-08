@@ -416,6 +416,62 @@ export async function initializeDatabase(): Promise<void> {
       CREATE INDEX IF NOT EXISTS rag_preferences_source_idx ON rag_preferences(source)
     `;
 
+    // Migrate existing rag_preferences rows
+    await client`ALTER TABLE rag_preferences ADD COLUMN IF NOT EXISTS chat_message_id UUID`;
+    await client`ALTER TABLE rag_preferences ADD COLUMN IF NOT EXISTS training_weight REAL`;
+
+    // Chat sessions — groups Q&A pairs from the same browser session
+    await client`
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        pipeline VARCHAR(20) NOT NULL,
+        model TEXT NOT NULL,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `;
+
+    // Chat messages — one row per Q&A pair (with optional user feedback)
+    await client`
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        session_id UUID REFERENCES chat_sessions(id) ON DELETE SET NULL,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        context JSONB NOT NULL DEFAULT '[]'::jsonb,
+        sources JSONB NOT NULL DEFAULT '[]'::jsonb,
+        pipeline VARCHAR(20) NOT NULL,
+        model TEXT NOT NULL,
+        latency_ms REAL NOT NULL,
+        rating VARCHAR(10),
+        rating_category VARCHAR(30),
+        rating_freetext TEXT,
+        rating_created_at TIMESTAMPTZ,
+        reviewed_at TIMESTAMPTZ,
+        training_weight REAL,
+        created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+      )
+    `;
+
+    await client`CREATE INDEX IF NOT EXISTS chat_messages_session_idx ON chat_messages(session_id)`;
+    await client`CREATE INDEX IF NOT EXISTS chat_messages_pipeline_idx ON chat_messages(pipeline)`;
+    await client`CREATE INDEX IF NOT EXISTS chat_messages_rating_idx ON chat_messages(rating)`;
+    await client`CREATE INDEX IF NOT EXISTS chat_messages_reviewed_idx ON chat_messages(reviewed_at)`;
+    await client`CREATE INDEX IF NOT EXISTS chat_messages_created_at_idx ON chat_messages(created_at)`;
+
+    // Now add the FK on rag_preferences.chat_message_id (chat_messages must exist first)
+    await client`
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1 FROM pg_constraint WHERE conname = 'rag_preferences_chat_message_id_fkey'
+        ) THEN
+          ALTER TABLE rag_preferences
+            ADD CONSTRAINT rag_preferences_chat_message_id_fkey
+            FOREIGN KEY (chat_message_id) REFERENCES chat_messages(id) ON DELETE SET NULL;
+        END IF;
+      END$$;
+    `;
+
     // Create rag_models table
     await client`
       CREATE TABLE IF NOT EXISTS rag_models (
@@ -442,6 +498,8 @@ export async function initializeDatabase(): Promise<void> {
         title TEXT NOT NULL DEFAULT 'Assistant',
         badge_label TEXT NOT NULL DEFAULT '',
         badge_url TEXT NOT NULL DEFAULT '',
+        empty_text TEXT NOT NULL DEFAULT 'Ask anything about the knowledge base',
+        suggested_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
         updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
       )
     `;
@@ -450,6 +508,8 @@ export async function initializeDatabase(): Promise<void> {
     await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS title TEXT NOT NULL DEFAULT 'Assistant'`;
     await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS badge_label TEXT NOT NULL DEFAULT ''`;
     await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS badge_url TEXT NOT NULL DEFAULT ''`;
+    await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS empty_text TEXT NOT NULL DEFAULT 'Ask anything about the knowledge base'`;
+    await client`ALTER TABLE widget_config ADD COLUMN IF NOT EXISTS suggested_questions JSONB NOT NULL DEFAULT '[]'::jsonb`;
 
     console.log('Database initialized successfully with pgvector and HNSW indexes');
   } catch (error) {
