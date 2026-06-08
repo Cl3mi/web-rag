@@ -9,6 +9,7 @@
 
 <script lang="ts">
   import { tick } from 'svelte';
+  import { renderMarkdown } from '$lib/utils/markdown';
 
   interface Source {
     title: string | null;
@@ -270,7 +271,9 @@
 
         <div class="cw-bubble cw-bubble--{msg.role}" class:cw-bubble--error={msg.error}>
           {#if msg.content}
-            <div class="cw-text">{msg.content}{#if msg.streaming}<span class="cw-cursor">▊</span>{/if}</div>
+            <div class="cw-text">
+              {@html renderMarkdown(msg.content)}{#if msg.streaming}<span class="cw-cursor">▊</span>{/if}
+            </div>
           {:else if msg.streaming}
             <div class="cw-typing">
               <span></span><span></span><span></span>
@@ -440,7 +443,31 @@
     background: rgba(239, 68, 68, 0.12); border-color: rgba(239, 68, 68, 0.3); color: #fca5a5;
   }
 
-  .cw-text { white-space: pre-wrap; font-size: 13.5px; }
+  .cw-text { font-size: 13.5px; overflow-wrap: anywhere; }
+  .cw-text :global(p) { margin: 0; }
+  .cw-text :global(p + p),
+  .cw-text :global(p + ul),
+  .cw-text :global(p + ol),
+  .cw-text :global(p + pre),
+  .cw-text :global(ul + p),
+  .cw-text :global(ol + p) { margin-top: 8px; }
+  .cw-text :global(ul), .cw-text :global(ol) { margin: 0; padding-left: 1.25em; }
+  .cw-text :global(li + li) { margin-top: 2px; }
+  .cw-text :global(code) {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    background: rgba(255, 255, 255, 0.08);
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+  .cw-text :global(pre) {
+    margin: 0; padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.25); border-radius: 6px;
+    overflow-x: auto; font-size: 12.5px;
+  }
+  .cw-text :global(pre code) { background: transparent; padding: 0; border-radius: 0; }
+  .cw-text :global(a) { color: inherit; text-decoration: underline; }
+  .cw-text :global(h1), .cw-text :global(h2), .cw-text :global(h3) { margin: 6px 0 4px; font-size: 1em; font-weight: 600; }
 
   .cw-typing { display: flex; gap: 4px; align-items: center; padding: 2px 0; }
   .cw-typing span {
