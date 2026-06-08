@@ -309,7 +309,7 @@
 </script>
 
 <svelte:head>
-  <title>Knowledge - RAG Lab</title>
+  <title>Knowledge</title>
 </svelte:head>
 
 <div class="knowledge-page">

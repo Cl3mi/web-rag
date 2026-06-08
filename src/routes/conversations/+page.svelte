@@ -237,7 +237,7 @@
 </script>
 
 <svelte:head>
-  <title>Conversations – RAG Lab</title>
+  <title>Conversations</title>
 </svelte:head>
 
 <div class="page">

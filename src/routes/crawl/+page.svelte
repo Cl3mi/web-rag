@@ -329,7 +329,7 @@
 </script>
 
 <svelte:head>
-  <title>Crawl - RAG Lab</title>
+  <title>Crawl</title>
 </svelte:head>
 
 <div class="crawl-page">

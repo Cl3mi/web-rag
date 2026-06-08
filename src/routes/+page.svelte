@@ -357,7 +357,7 @@
 </script>
 
 <svelte:head>
-  <title>Dashboard - RAG Lab</title>
+  <title>Dashboard</title>
 </svelte:head>
 
 <div class="dashboard">

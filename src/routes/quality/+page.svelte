@@ -507,7 +507,7 @@
 </script>
 
 <svelte:head>
-  <title>Answer Quality - RAG Lab</title>
+  <title>Answer Quality</title>
 </svelte:head>
 
 <div class="quality-page">

@@ -397,7 +397,7 @@
 </script>
 
 <svelte:head>
-  <title>Evaluate - RAG Lab</title>
+  <title>Evaluate</title>
 </svelte:head>
 
 <div class="evaluate-page">

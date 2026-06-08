@@ -51,7 +51,7 @@
 <div class="app-layout">
   <nav class="sidebar">
     <div class="logo">
-      <span class="logo-text">RAG Lab</span>
+      <span class="logo-text">Chatbot</span>
     </div>
 
     <ul class="nav-list">
