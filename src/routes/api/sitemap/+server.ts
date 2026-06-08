@@ -8,7 +8,17 @@
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
 import { parseSitemapDeep } from '$lib/server/pipeline/shared/scraper';
-import { ingestUrl } from '$lib/server/pipeline/shared/ingest';
+import { ingestUrl, type PipelineSelection } from '$lib/server/pipeline/shared/ingest';
+
+function parsePipelines(raw: unknown): PipelineSelection | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  return {
+    chunk: typeof r.chunk === 'boolean' ? r.chunk : undefined,
+    fact: typeof r.fact === 'boolean' ? r.fact : undefined,
+    llm: typeof r.llm === 'boolean' ? r.llm : undefined,
+  };
+}
 
 export const GET: RequestHandler = async ({ url }) => {
   const sitemapUrl = url.searchParams.get('url');
@@ -38,7 +48,8 @@ export const GET: RequestHandler = async ({ url }) => {
 
 export const POST: RequestHandler = async ({ request }) => {
   const body = await request.json().catch(() => ({}));
-  const { urls } = body as { urls?: unknown[] };
+  const { urls, pipelines: pipelinesRaw } = body as { urls?: unknown[]; pipelines?: unknown };
+  const pipelines = parsePipelines(pipelinesRaw);
 
   if (!Array.isArray(urls) || urls.length === 0) {
     return json({ error: 'urls array is required and must not be empty' }, { status: 400 });
@@ -66,7 +77,7 @@ export const POST: RequestHandler = async ({ request }) => {
       for (const url of urls as string[]) {
         console.log(`Ingesting: ${url}`);
         try {
-          const result = await ingestUrl(url);
+          const result = await ingestUrl(url, pipelines);
 
           if (result.status === 'processed') processed++;
           else if (result.status === 'unchanged') unchanged++;
@@ -81,12 +92,15 @@ export const POST: RequestHandler = async ({ request }) => {
             chunkCount: result.chunk.chunkCount,
             factCount: result.fact.factCount,
             llmChunkCount: result.llm.chunkCount,
+            chunkSkipped: result.chunk.skipped === true,
+            factSkipped: result.fact.skipped === true,
+            llmSkipped: result.llm.skipped === true,
             processingTimeMs: result.processingTimeMs,
             error: result.error,
           });
         } catch (e) {
           failed++;
-          send({ type: 'progress', url, status: 'error', error: e instanceof Error ? e.message : 'Unknown error', chunkCount: 0, factCount: 0, llmChunkCount: 0 });
+          send({ type: 'progress', url, status: 'error', error: e instanceof Error ? e.message : 'Unknown error', chunkCount: 0, factCount: 0, llmChunkCount: 0, chunkSkipped: false, factSkipped: false, llmSkipped: false });
         }
       }
 

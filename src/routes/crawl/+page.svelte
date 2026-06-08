@@ -11,10 +11,17 @@
     chunk: {
       chunkCount: number;
       processingTimeMs: number;
+      skipped?: boolean;
     };
     fact: {
       factCount: number;
       processingTimeMs: number;
+      skipped?: boolean;
+    };
+    llm: {
+      chunkCount: number;
+      processingTimeMs: number;
+      skipped?: boolean;
     };
   }
 
@@ -41,6 +48,9 @@
     chunkCount: number;
     factCount: number;
     llmChunkCount: number;
+    chunkSkipped?: boolean;
+    factSkipped?: boolean;
+    llmSkipped?: boolean;
     processingTimeMs: number;
     error?: string;
   }
@@ -52,6 +62,18 @@
   let processingStatus = $state('');
   let processingError = $state('');
   let lastResult = $state<ProcessingResult | null>(null);
+
+  // Pipeline selection (shared by single-URL and sitemap crawl).
+  // Default to chunk-only — fact and llm are opt-in.
+  let pipelineChunk = $state(true);
+  let pipelineFact = $state(false);
+  let pipelineLLM = $state(false);
+  const selectedPipelines = $derived({
+    chunk: pipelineChunk,
+    fact: pipelineFact,
+    llm: pipelineLLM,
+  });
+  const noPipelineSelected = $derived(!pipelineChunk && !pipelineFact && !pipelineLLM);
 
   // Sitemap state
   let sitemapUrl = $state('');
@@ -143,7 +165,7 @@
       const response = await fetch('/api/scrape', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
+        body: JSON.stringify({ url, pipelines: selectedPipelines }),
       });
 
       const data = await response.json();
@@ -157,10 +179,11 @@
       if (data.status === 'unchanged') {
         showToast('success', 'Content unchanged, using existing data');
       } else {
-        showToast(
-          'success',
-          `Processed: ${data.chunk.chunkCount} chunks, ${data.fact.factCount} facts`
-        );
+        const parts: string[] = [];
+        if (!data.chunk.skipped) parts.push(`${data.chunk.chunkCount} chunks`);
+        if (!data.fact.skipped) parts.push(`${data.fact.factCount} facts`);
+        if (!data.llm.skipped) parts.push(`${data.llm.chunkCount} LLM chunks`);
+        showToast('success', `Processed: ${parts.join(', ') || 'no pipelines ran'}`);
       }
 
       urlInput = '';
@@ -271,7 +294,7 @@
       const res = await fetch('/api/sitemap', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: Array.from(selectedUrls) }),
+        body: JSON.stringify({ urls: Array.from(selectedUrls), pipelines: selectedPipelines }),
       });
       if (!res.ok || !res.body) throw new Error('Failed to start crawl');
 
@@ -335,14 +358,50 @@
 <div class="crawl-page">
   <header class="page-header">
     <h1>Crawl & Process</h1>
-    <p class="subtitle">Add URLs to process through both pipelines</p>
+    <p class="subtitle">Add URLs and choose which RAG pipelines index them</p>
   </header>
+
+  <!-- Pipeline Selection (applies to both single-URL and sitemap crawls) -->
+  <section class="card">
+    <h2>Pipelines to index</h2>
+    <p class="form-hint">
+      The traditional <strong>Chunk</strong> pipeline is selected by default. Enable additional
+      pipelines only when you want to compare strategies — each one adds processing time
+      (Fact: sentence-level extraction; LLM: per-chunk summarization, slowest).
+    </p>
+    <div class="pipeline-checkboxes">
+      <label class="pipeline-checkbox">
+        <input type="checkbox" bind:checked={pipelineChunk} disabled={isProcessing || isCrawling} />
+        <span class="pipeline-checkbox-body">
+          <span class="pipeline-name chunk">Chunk</span>
+          <span class="pipeline-desc">Hybrid BM25 + dense retrieval on raw text chunks</span>
+        </span>
+      </label>
+      <label class="pipeline-checkbox">
+        <input type="checkbox" bind:checked={pipelineFact} disabled={isProcessing || isCrawling} />
+        <span class="pipeline-checkbox-body">
+          <span class="pipeline-name fact">Fact</span>
+          <span class="pipeline-desc">Atomic sentence-level facts (BGE-M3 dense + sparse)</span>
+        </span>
+      </label>
+      <label class="pipeline-checkbox">
+        <input type="checkbox" bind:checked={pipelineLLM} disabled={isProcessing || isCrawling} />
+        <span class="pipeline-checkbox-body">
+          <span class="pipeline-name llm">LLM</span>
+          <span class="pipeline-desc">LLM-summarized chunks (requires Ollama, slowest)</span>
+        </span>
+      </label>
+    </div>
+    {#if noPipelineSelected}
+      <p class="error-text">Select at least one pipeline to index.</p>
+    {/if}
+  </section>
 
   <!-- URL Input Form -->
   <section class="card">
     <h2>Process a URL</h2>
     <p class="form-hint">
-      Enter a URL to fetch, extract content, and process through both Chunk and Fact pipelines.
+      Enter a URL to fetch, extract content, and process through the selected pipelines.
     </p>
 
     <div class="input-group">
@@ -359,7 +418,7 @@
       <button
         class="btn btn-primary"
         onclick={processUrl}
-        disabled={isProcessing || !urlInput.trim()}
+        disabled={isProcessing || !urlInput.trim() || noPipelineSelected}
       >
         {#if isProcessing}
           <span class="spinner-small"></span>
@@ -400,32 +459,58 @@
       </div>
 
       <div class="pipeline-results">
-        <div class="pipeline-result chunk">
+        <div class="pipeline-result chunk" class:skipped={lastResult.chunk.skipped}>
           <h3>Chunk Pipeline</h3>
-          <div class="pipeline-stats">
-            <div class="stat">
-              <span class="stat-value">{lastResult.chunk.chunkCount}</span>
-              <span class="stat-label">Chunks</span>
+          {#if lastResult.chunk.skipped}
+            <p class="pipeline-skipped">Not selected</p>
+          {:else}
+            <div class="pipeline-stats">
+              <div class="stat">
+                <span class="stat-value">{lastResult.chunk.chunkCount}</span>
+                <span class="stat-label">Chunks</span>
+              </div>
+              <div class="stat">
+                <span class="stat-value">{lastResult.chunk.processingTimeMs}ms</span>
+                <span class="stat-label">Time</span>
+              </div>
             </div>
-            <div class="stat">
-              <span class="stat-value">{lastResult.chunk.processingTimeMs}ms</span>
-              <span class="stat-label">Time</span>
-            </div>
-          </div>
+          {/if}
         </div>
 
-        <div class="pipeline-result fact">
+        <div class="pipeline-result fact" class:skipped={lastResult.fact.skipped}>
           <h3>Fact Pipeline</h3>
-          <div class="pipeline-stats">
-            <div class="stat">
-              <span class="stat-value">{lastResult.fact.factCount}</span>
-              <span class="stat-label">Facts</span>
+          {#if lastResult.fact.skipped}
+            <p class="pipeline-skipped">Not selected</p>
+          {:else}
+            <div class="pipeline-stats">
+              <div class="stat">
+                <span class="stat-value">{lastResult.fact.factCount}</span>
+                <span class="stat-label">Facts</span>
+              </div>
+              <div class="stat">
+                <span class="stat-value">{lastResult.fact.processingTimeMs}ms</span>
+                <span class="stat-label">Time</span>
+              </div>
             </div>
-            <div class="stat">
-              <span class="stat-value">{lastResult.fact.processingTimeMs}ms</span>
-              <span class="stat-label">Time</span>
+          {/if}
+        </div>
+
+        <div class="pipeline-result llm" class:skipped={lastResult.llm.skipped}>
+          <h3>LLM Pipeline</h3>
+          {#if lastResult.llm.skipped}
+            <p class="pipeline-skipped">Not selected</p>
+          {:else}
+            <div class="pipeline-stats">
+              <div class="stat">
+                <span class="stat-value">{lastResult.llm.chunkCount}</span>
+                <span class="stat-label">Chunks</span>
+              </div>
+              <div class="stat">
+                <span class="stat-value">{lastResult.llm.processingTimeMs}ms</span>
+                <span class="stat-label">Time</span>
+              </div>
             </div>
-          </div>
+          {/if}
         </div>
       </div>
     </section>
@@ -538,7 +623,7 @@
         <button
           class="btn btn-primary"
           onclick={crawlSelected}
-          disabled={isCrawling || selectedUrls.size === 0}
+          disabled={isCrawling || selectedUrls.size === 0 || noPipelineSelected}
         >
           {#if isCrawling}
             <span class="spinner-small"></span>
@@ -584,10 +669,10 @@
                     {r.status}
                   </span>
                 </td>
-                <td>{r.chunkCount ?? '-'}</td>
-                <td>{r.factCount ?? '-'}</td>
-                <td class:llm-zero={r.llmChunkCount === 0 && r.status === 'processed'}>
-                  {r.llmChunkCount ?? '-'}
+                <td>{r.chunkSkipped ? '—' : (r.chunkCount ?? '-')}</td>
+                <td>{r.factSkipped ? '—' : (r.factCount ?? '-')}</td>
+                <td class:llm-zero={r.llmChunkCount === 0 && r.status === 'processed' && !r.llmSkipped}>
+                  {r.llmSkipped ? '—' : (r.llmChunkCount ?? '-')}
                 </td>
               </tr>
             {/each}
@@ -748,7 +833,7 @@
 
   .pipeline-results {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(3, 1fr);
     gap: 16px;
   }
 
@@ -765,6 +850,76 @@
 
   .pipeline-result.fact {
     border-top-color: #28a745;
+  }
+
+  .pipeline-result.llm {
+    border-top-color: #c084fc;
+  }
+
+  .pipeline-result.skipped {
+    opacity: 0.45;
+  }
+
+  .pipeline-skipped {
+    color: #888;
+    font-size: 0.85rem;
+    font-style: italic;
+  }
+
+  .pipeline-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  @media (max-width: 768px) {
+    .pipeline-checkboxes {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .pipeline-checkbox {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    background: #373737;
+    border-radius: 6px;
+    padding: 12px 14px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: border-color 0.15s;
+  }
+
+  .pipeline-checkbox:has(input:checked) {
+    border-color: #4da3ff;
+    background: #2d3a4d;
+  }
+
+  .pipeline-checkbox input[type="checkbox"] {
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+
+  .pipeline-checkbox-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .pipeline-name {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #fff;
+  }
+
+  .pipeline-name.chunk { color: #4da3ff; }
+  .pipeline-name.fact { color: #28a745; }
+  .pipeline-name.llm { color: #c084fc; }
+
+  .pipeline-desc {
+    font-size: 0.75rem;
+    color: #888;
   }
 
   .pipeline-result h3 {

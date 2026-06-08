@@ -89,6 +89,17 @@
   let loading = $state(true);
   let error = $state('');
 
+  // Pipeline availability — pipelines with 0 indexed rows are hidden from selectors.
+  let pipelineAvailable = $state<{ chunk: boolean; fact: boolean; llm: boolean }>({
+    chunk: true,
+    fact: true,
+    llm: true,
+  });
+  const availablePipelineList = $derived(
+    (['chunk', 'fact', 'llm'] as const).filter((p) => pipelineAvailable[p])
+  );
+  const anyPipelineAvailable = $derived(availablePipelineList.length > 0);
+
   // Chat state
   let chatInput = $state('');
   let chatPipeline = $state<'chunk' | 'fact' | 'llm'>('chunk');
@@ -120,10 +131,11 @@
     error = '';
 
     try {
-      const [metricsRes, evalRes, modelsRes] = await Promise.all([
+      const [metricsRes, evalRes, modelsRes, statusRes] = await Promise.all([
         fetch('/api/metrics'),
         fetch('/api/evaluate/latest'),
         fetch('/api/chat'),
+        fetch('/api/pipelines/status'),
       ]);
 
       if (metricsRes.ok) {
@@ -142,6 +154,24 @@
           chatModel = modelsData.defaultModel;
         } else if (availableModels.length > 0) {
           chatModel = availableModels[0];
+        }
+      }
+
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        if (statusData?.available) {
+          pipelineAvailable = {
+            chunk: !!statusData.available.chunk,
+            fact: !!statusData.available.fact,
+            llm: !!statusData.available.llm,
+          };
+          // Auto-switch chat & quick-search pipeline if the current pick is now empty.
+          if (!pipelineAvailable[chatPipeline] && availablePipelineList.length > 0) {
+            chatPipeline = availablePipelineList[0];
+          }
+          if (!pipelineAvailable[searchPipeline] && availablePipelineList.length > 0) {
+            searchPipeline = availablePipelineList[0];
+          }
         }
       }
     } catch (e) {
@@ -303,24 +333,27 @@
     searching = true;
 
     try {
-      // Search all three pipelines in parallel
+      // Search available pipelines only. Unavailable ones return empty results.
+      const emptyRes = Promise.resolve({ ok: false } as Response);
       const [chunkRes, factRes, llmRes] = await Promise.all([
-        fetch('/api/query', {
+        pipelineAvailable.chunk ? fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery, pipeline: 'chunk', topK: searchTopK, rerank: searchRerank, hybridAlpha: searchAlpha }),
-        }),
-        fetch('/api/query', {
+        }) : emptyRes,
+        pipelineAvailable.fact ? fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery, pipeline: 'fact', topK: searchTopK, rerank: searchRerank }),
-        }),
-        fetch('/api/query', {
+        }) : emptyRes,
+        pipelineAvailable.llm ? fetch('/api/query', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ query: searchQuery, pipeline: 'llm', topK: searchTopK, rerank: searchRerank }),
-        }),
+        }) : emptyRes,
       ]);
+
+      searchResults = { chunk: [], fact: [], llm: [] };
 
       if (chunkRes.ok) {
         const data = await chunkRes.json();
@@ -430,29 +463,39 @@
         <div class="chat-controls">
           <div class="control-group">
             <label class="control-label">Pipeline</label>
-            <div class="pipeline-toggle">
-              <button
-                class="toggle-btn"
-                class:active={chatPipeline === 'chunk'}
-                onclick={() => (chatPipeline = 'chunk')}
-              >
-                Chunk
-              </button>
-              <button
-                class="toggle-btn"
-                class:active={chatPipeline === 'fact'}
-                onclick={() => (chatPipeline = 'fact')}
-              >
-                Fact
-              </button>
-              <button
-                class="toggle-btn"
-                class:active={chatPipeline === 'llm'}
-                onclick={() => (chatPipeline = 'llm')}
-              >
-                LLM
-              </button>
-            </div>
+            {#if anyPipelineAvailable}
+              <div class="pipeline-toggle">
+                {#if pipelineAvailable.chunk}
+                  <button
+                    class="toggle-btn"
+                    class:active={chatPipeline === 'chunk'}
+                    onclick={() => (chatPipeline = 'chunk')}
+                  >
+                    Chunk
+                  </button>
+                {/if}
+                {#if pipelineAvailable.fact}
+                  <button
+                    class="toggle-btn"
+                    class:active={chatPipeline === 'fact'}
+                    onclick={() => (chatPipeline = 'fact')}
+                  >
+                    Fact
+                  </button>
+                {/if}
+                {#if pipelineAvailable.llm}
+                  <button
+                    class="toggle-btn"
+                    class:active={chatPipeline === 'llm'}
+                    onclick={() => (chatPipeline = 'llm')}
+                  >
+                    LLM
+                  </button>
+                {/if}
+              </div>
+            {:else}
+              <p class="no-models">No pipelines indexed — visit <a href="/crawl">/crawl</a></p>
+            {/if}
           </div>
           <div class="control-group">
             <label class="control-label">
@@ -615,12 +658,12 @@
           placeholder="Ask a question..."
           bind:value={chatInput}
           onkeydown={(e) => e.key === 'Enter' && sendChatMessage()}
-          disabled={chatLoading || !chatModel}
+          disabled={chatLoading || !chatModel || !anyPipelineAvailable}
         />
         <button
           class="btn btn-primary"
           onclick={sendChatMessage}
-          disabled={chatLoading || !chatInput.trim() || !chatModel}
+          disabled={chatLoading || !chatInput.trim() || !chatModel || !anyPipelineAvailable}
         >
           {#if chatLoading}
             <span class="spinner-small"></span>
@@ -735,7 +778,7 @@
     <!-- Quick Search Test -->
     <section class="card search-section">
       <h2>Quick Search Test</h2>
-      <p class="section-desc">Test all pipelines side-by-side</p>
+      <p class="section-desc">Test indexed pipelines side-by-side</p>
 
       <div class="search-form">
         <input
@@ -802,50 +845,56 @@
 
       {#if searchResults.chunk.length > 0 || searchResults.fact.length > 0 || searchResults.llm.length > 0}
         <div class="search-results three-col">
-          <div class="results-column chunk">
-            <h4>Chunk Pipeline</h4>
-            {#each searchResults.chunk as result}
-              <div class="result-item">
-                <div class="result-score badge badge-blue">{(result.score ?? 0).toFixed(3)}</div>
-                <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
-                {#if result.sourceTitle}
-                  <div class="result-source">{result.sourceTitle}</div>
-                {/if}
-              </div>
-            {:else}
-              <p class="no-results">No results</p>
-            {/each}
-          </div>
+          {#if pipelineAvailable.chunk}
+            <div class="results-column chunk">
+              <h4>Chunk Pipeline</h4>
+              {#each searchResults.chunk as result}
+                <div class="result-item">
+                  <div class="result-score badge badge-blue">{(result.score ?? 0).toFixed(3)}</div>
+                  <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
+                  {#if result.sourceTitle}
+                    <div class="result-source">{result.sourceTitle}</div>
+                  {/if}
+                </div>
+              {:else}
+                <p class="no-results">No results</p>
+              {/each}
+            </div>
+          {/if}
 
-          <div class="results-column fact">
-            <h4>Fact Pipeline</h4>
-            {#each searchResults.fact as result}
-              <div class="result-item">
-                <div class="result-score badge badge-green">{(result.score ?? 0).toFixed(3)}</div>
-                <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
-                {#if result.sourceTitle}
-                  <div class="result-source">{result.sourceTitle}</div>
-                {/if}
-              </div>
-            {:else}
-              <p class="no-results">No results</p>
-            {/each}
-          </div>
+          {#if pipelineAvailable.fact}
+            <div class="results-column fact">
+              <h4>Fact Pipeline</h4>
+              {#each searchResults.fact as result}
+                <div class="result-item">
+                  <div class="result-score badge badge-green">{(result.score ?? 0).toFixed(3)}</div>
+                  <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
+                  {#if result.sourceTitle}
+                    <div class="result-source">{result.sourceTitle}</div>
+                  {/if}
+                </div>
+              {:else}
+                <p class="no-results">No results</p>
+              {/each}
+            </div>
+          {/if}
 
-          <div class="results-column llm">
-            <h4>LLM Pipeline</h4>
-            {#each searchResults.llm as result}
-              <div class="result-item">
-                <div class="result-score badge badge-purple">{(result.score ?? 0).toFixed(3)}</div>
-                <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
-                {#if result.sourceTitle}
-                  <div class="result-source">{result.sourceTitle}</div>
-                {/if}
-              </div>
-            {:else}
-              <p class="no-results">No results</p>
-            {/each}
-          </div>
+          {#if pipelineAvailable.llm}
+            <div class="results-column llm">
+              <h4>LLM Pipeline</h4>
+              {#each searchResults.llm as result}
+                <div class="result-item">
+                  <div class="result-score badge badge-purple">{(result.score ?? 0).toFixed(3)}</div>
+                  <div class="result-content">{(result.content ?? '').slice(0, 150)}...</div>
+                  {#if result.sourceTitle}
+                    <div class="result-source">{result.sourceTitle}</div>
+                  {/if}
+                </div>
+              {:else}
+                <p class="no-results">No results</p>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     </section>

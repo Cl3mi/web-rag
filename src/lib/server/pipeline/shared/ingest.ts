@@ -15,6 +15,12 @@ import { embedLLMChunks } from '$lib/server/pipeline/llm/embedder';
 import { sql } from '$lib/server/db/client';
 import type { Chunk } from '$lib/server/pipeline/traditional/chunker';
 
+export interface PipelineSelection {
+  chunk?: boolean;
+  fact?: boolean;
+  llm?: boolean;
+}
+
 export interface IngestResult {
   documentId: string;
   status: 'processed' | 'unchanged' | 'error';
@@ -22,16 +28,31 @@ export interface IngestResult {
   title: string | null;
   wordCount: number;
   processingTimeMs: number;
-  chunk: { chunkCount: number; processingTimeMs: number };
-  fact: { factCount: number; processingTimeMs: number };
-  llm: { chunkCount: number; processingTimeMs: number };
+  chunk: { chunkCount: number; processingTimeMs: number; skipped?: boolean };
+  fact: { factCount: number; processingTimeMs: number; skipped?: boolean };
+  llm: { chunkCount: number; processingTimeMs: number; skipped?: boolean };
   error?: string;
 }
 
+const DEFAULT_PIPELINES: Required<PipelineSelection> = { chunk: true, fact: false, llm: false };
+
+function normalizePipelines(selection?: PipelineSelection): Required<PipelineSelection> {
+  if (!selection) return { ...DEFAULT_PIPELINES };
+  const merged = {
+    chunk: selection.chunk ?? false,
+    fact: selection.fact ?? false,
+    llm: selection.llm ?? false,
+  };
+  // If caller passed an empty selection, fall back to chunk-only rather than no-op.
+  if (!merged.chunk && !merged.fact && !merged.llm) return { ...DEFAULT_PIPELINES };
+  return merged;
+}
+
 /**
- * Ingest a single URL through all three pipelines.
+ * Ingest a single URL. `pipelines` selects which RAG pipelines to index (default: chunk only).
  */
-export async function ingestUrl(url: string): Promise<IngestResult> {
+export async function ingestUrl(url: string, pipelines?: PipelineSelection): Promise<IngestResult> {
+  const active = normalizePipelines(pipelines);
   const blank: IngestResult = {
     documentId: '',
     status: 'error',
@@ -89,10 +110,11 @@ export async function ingestUrl(url: string): Promise<IngestResult> {
         };
       }
 
-      // Content changed — delete old chunks then update
-      await sql`DELETE FROM traditional_chunks WHERE document_id = ${documentId}`;
-      await sql`DELETE FROM facts_chunks WHERE document_id = ${documentId}`;
-      await sql`DELETE FROM llm_chunks WHERE document_id = ${documentId}`;
+      // Content changed — delete old rows for the pipelines we are re-indexing.
+      // Non-selected pipelines keep their (now stale) data; re-run /api/reindex to refresh them.
+      if (active.chunk) await sql`DELETE FROM traditional_chunks WHERE document_id = ${documentId}`;
+      if (active.fact) await sql`DELETE FROM facts_chunks WHERE document_id = ${documentId}`;
+      if (active.llm) await sql`DELETE FROM llm_chunks WHERE document_id = ${documentId}`;
 
       await sql`
         UPDATE documents SET
@@ -133,17 +155,26 @@ export async function ingestUrl(url: string): Promise<IngestResult> {
 
     // Run pipelines
     const startTime = performance.now();
-    const chunks = chunkText(extracted.markdownContent);
+    // Chunking output is needed by both the chunk and llm pipelines.
+    const chunks = (active.chunk || active.llm) ? chunkText(extracted.markdownContent) : [];
+
+    const skippedChunk = { chunkCount: 0, processingTimeMs: 0, skipped: true as const };
+    const skippedFact = { factCount: 0, processingTimeMs: 0, skipped: true as const };
+    const skippedLLM = { chunkCount: 0, processingTimeMs: 0, skipped: true as const };
 
     const [chunkResult, factResult] = await Promise.all([
-      processChunkPipeline(documentId, chunks),
-      processFactPipeline(documentId, extracted.markdownContent),
+      active.chunk ? processChunkPipeline(documentId, chunks) : Promise.resolve(skippedChunk),
+      active.fact ? processFactPipeline(documentId, extracted.markdownContent) : Promise.resolve(skippedFact),
     ]);
 
-    const ollamaAvailable = await checkOllamaAvailable();
-    let llmResult = { chunkCount: 0, processingTimeMs: 0 };
-    if (ollamaAvailable && chunks.length > 0) {
-      llmResult = await processLLMPipeline(documentId, chunks);
+    let llmResult: IngestResult['llm'] = skippedLLM;
+    if (active.llm) {
+      const ollamaAvailable = await checkOllamaAvailable();
+      if (ollamaAvailable && chunks.length > 0) {
+        llmResult = await processLLMPipeline(documentId, chunks);
+      } else {
+        llmResult = { chunkCount: 0, processingTimeMs: 0 };
+      }
     }
 
     return {

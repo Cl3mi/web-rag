@@ -7,13 +7,23 @@
 
 import { json } from '@sveltejs/kit';
 import type { RequestHandler } from './$types';
-import { ingestUrl } from '$lib/server/pipeline/shared/ingest';
+import { ingestUrl, type PipelineSelection } from '$lib/server/pipeline/shared/ingest';
 import { sql } from '$lib/server/db/client';
+
+function parsePipelines(raw: unknown): PipelineSelection | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const r = raw as Record<string, unknown>;
+  return {
+    chunk: typeof r.chunk === 'boolean' ? r.chunk : undefined,
+    fact: typeof r.fact === 'boolean' ? r.fact : undefined,
+    llm: typeof r.llm === 'boolean' ? r.llm : undefined,
+  };
+}
 
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const body = await request.json();
-    const { url } = body;
+    const { url, pipelines } = body;
 
     if (!url || typeof url !== 'string') {
       return json({ error: 'URL is required' }, { status: 400 });
@@ -27,7 +37,7 @@ export const POST: RequestHandler = async ({ request }) => {
     }
 
     console.log(`Fetching URL: ${url}`);
-    const result = await ingestUrl(url);
+    const result = await ingestUrl(url, parsePipelines(pipelines));
 
     if (result.status === 'error') {
       return json({ error: result.error }, { status: 400 });

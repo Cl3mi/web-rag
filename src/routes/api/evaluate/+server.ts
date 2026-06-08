@@ -154,11 +154,37 @@ export const POST: RequestHandler = async ({ request }) => {
     } = body;
 
     const ALL_PIPELINES = ['chunk', 'fact', 'llm'] as const;
-    const activePipelines = new Set<string>(
+    const requestedPipelines = new Set<string>(
       Array.isArray(selectedPipelines) && selectedPipelines.length > 0
         ? selectedPipelines.filter((p: string) => (ALL_PIPELINES as readonly string[]).includes(p))
         : ALL_PIPELINES
     );
+
+    // Silently skip pipelines with no indexed rows so the eval can run with
+    // any subset of pipelines populated.
+    const [chunkCountRow, factCountRow, llmCountRow] = await Promise.all([
+      sql`SELECT COUNT(*)::int AS count FROM traditional_chunks`,
+      sql`SELECT COUNT(*)::int AS count FROM facts_chunks`,
+      sql`SELECT COUNT(*)::int AS count FROM llm_chunks`,
+    ]);
+    const pipelineHasData: Record<string, boolean> = {
+      chunk: Number(chunkCountRow[0]?.count ?? 0) > 0,
+      fact: Number(factCountRow[0]?.count ?? 0) > 0,
+      llm: Number(llmCountRow[0]?.count ?? 0) > 0,
+    };
+    const skippedPipelines: string[] = [];
+    const activePipelines = new Set<string>();
+    for (const p of requestedPipelines) {
+      if (pipelineHasData[p]) activePipelines.add(p);
+      else skippedPipelines.push(p);
+    }
+
+    if (activePipelines.size === 0) {
+      return json(
+        { error: 'No indexed data for the requested pipelines. Run /crawl first.' },
+        { status: 400 }
+      );
+    }
 
     // Get test queries with expected document IDs
     const testQueries = await sql`
@@ -479,6 +505,8 @@ export const POST: RequestHandler = async ({ request }) => {
       queryCount: testQueries.length,
       metrics: aggregatedMetrics,
       comparisons,
+      activePipelines: [...activePipelines],
+      skippedPipelines,
     });
   } catch (error) {
     console.error('Evaluation error:', error);
