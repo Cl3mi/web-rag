@@ -64,25 +64,20 @@ export async function searchLLMChunks(
       queryEmbedding.sparse,
       (r.sparse_vector as Record<string, number>) || {}
     );
-    return { ...r, similarity: alpha * denseScore + (1 - alpha) * sparseScore };
+    return { row: r, similarity: alpha * denseScore + (1 - alpha) * sparseScore };
   });
 
   scored.sort((a, b) => b.similarity - a.similarity);
 
   // Filter by minimum score and format results
   const filtered = scored
-    .filter((r) => r.similarity >= minScore)
+    .filter((x) => x.similarity >= minScore)
     .slice(0, topK);
 
-  return filtered.map((r) => ({
+  return filtered.map(({ row: r, similarity }) => ({
     id: r.id as string,
-    // Use original_content as context — the embedding was trained on
-    // summary+original (good retrieval), but the generated summary is too
-    // lossy (1-2 sentences) for the LLM and judge to answer specific fact
-    // queries. Serving original_content gives the full detail needed while
-    // the context window limit (8 000 chars) provides natural length control.
     content: r.original_content as string,
-    score: r.similarity as number,
+    score: similarity,
     documentId: r.document_id as string,
     metadata: {
       ...(r.metadata as Record<string, unknown>),

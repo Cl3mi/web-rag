@@ -91,31 +91,23 @@ export async function searchFacts(
       queryEmbedding.sparse,
       (r.sparse_vector as Record<string, number>) || {}
     );
-    return { ...r, score: alpha * denseScore + (1 - alpha) * sparseScore };
+    return { row: r, score: alpha * denseScore + (1 - alpha) * sparseScore };
   });
 
   scored.sort((a, b) => b.score - a.score);
   const topResults = scored.slice(0, opts.topK);
 
   return topResults
-    .filter((r) => (r.score as number) >= opts.minScore)
-    .map((r) => ({
+    .filter((x) => x.score >= opts.minScore)
+    .map(({ row: r, score }) => ({
       id: r.id as string,
-      // Use sourceContext (surrounding sentences) as primary content when available.
-      // The extracted fact sentence alone is too decontextualized for the LLM to
-      // answer most questions — it lacks the prose around it that gives it meaning.
-      // sourceContext includes the fact plus ±1 surrounding sentence, giving the
-      // model enough prose context without doubling chunk size.
       content: (r.source_context as string) || (r.content as string),
-      score: r.score as number,
+      score,
       documentId: r.document_id as string,
       metadata: {
         category: r.category as string,
         confidence: r.confidence as number,
-        // Keep the extracted fact in metadata for downstream inspection/filtering.
         factContent: r.content as string,
-        // fact_index preserved so callers can sort by document + position,
-        // creating coherent sequential passages instead of a score-ordered mosaic.
         factIndex: r.fact_index as number,
         ...(r.metadata as Record<string, unknown>),
       },
