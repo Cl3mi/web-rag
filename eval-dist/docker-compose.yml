@@ -1,0 +1,98 @@
+services:
+  # Vendor-supplied evaluation server.
+  # All routes other than /api/external/* are 404'd (EVAL_SERVER_MODE=1).
+  eval-server:
+    image: ghcr.io/cl3mi/web-rag-eval:latest
+    container_name: web-rag-eval-server
+    pull_policy: always
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      EVAL_SERVER_MODE: "1"
+      EVAL_API_KEY: ${EVAL_API_KEY:?Set EVAL_API_KEY in .env}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: eval
+      DATABASE_USER: eval_user
+      DATABASE_PASSWORD: eval_password
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_JUDGE_MODEL: ${OLLAMA_JUDGE_MODEL:-qwen2.5:7b}
+      LLM_PROVIDER: ollama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: web-rag-eval-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: eval_user
+      POSTGRES_PASSWORD: eval_password
+      POSTGRES_DB: eval
+    volumes:
+      - eval_pgdata:/var/lib/postgresql/data
+      # Seed test_queries on first boot. Replace with the file produced by
+      # `bun run eval-dist/scripts/export-queries.ts`.
+      - ./seed/queries.sql:/docker-entrypoint-initdb.d/00-queries.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eval_user -d eval"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Judge LLM. GPU profile if you have NVIDIA + nvidia-container-toolkit;
+  # otherwise the default CPU service runs (much slower).
+  ollama:
+    image: ollama/ollama:latest
+    container_name: web-rag-eval-ollama
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - eval_ollama:/root/.ollama
+      - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_JUDGE_MODEL:-qwen2.5:7b}
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+      start_period: 600s
+
+  # Opt-in GPU variant: `docker compose --profile gpu up`
+  ollama-gpu:
+    image: ollama/ollama:latest
+    container_name: web-rag-eval-ollama-gpu
+    profiles: ["gpu"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - eval_ollama:/root/.ollama
+      - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    environment:
+      OLLAMA_MODEL: ${OLLAMA_JUDGE_MODEL:-qwen2.5:7b}
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 30s
+      retries: 20
+      start_period: 600s
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  eval_pgdata:
+  eval_ollama:

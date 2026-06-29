@@ -1,0 +1,10 @@
+.git
+.github
+build
+node_modules
+training_output
+eval-dist
+*.md
+!CLAUDE.md
+.env
+.env.*

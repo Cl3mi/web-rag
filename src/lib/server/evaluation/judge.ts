@@ -283,7 +283,7 @@ function parseJudgeResponse(response: string): JudgeScores | null {
  * score high on groundedness but low on completeness/correctness — are not
  * incorrectly classified as good generation.
  */
-function classifyFailureType(
+export function classifyFailureType(
   recallAtK: number | null,
   judgeMean: number,
   hallucination: boolean = false,
@@ -380,6 +380,34 @@ async function judgeRow(
   }
 
   return { groundedness, completeness, answerQuality, hallucination, answerableFromContext };
+}
+
+/**
+ * Stateless judge entry point for external (client) submissions.
+ * Same prompt + majority vote logic as the internal pipeline, no DB read/write.
+ */
+export async function judgeAnswer(input: {
+  question: string;
+  context: string;
+  answer: string;
+  judgeModel?: string;
+  runs?: number;
+}): Promise<JudgeScores | null> {
+  const model = input.judgeModel ?? DEFAULT_JUDGE_MODEL;
+  const runs = input.runs ?? 3;
+  return judgeRow(
+    {
+      id: '',
+      question: input.question,
+      retrieved_context: input.context,
+      generated_answer: input.answer,
+      recall_at_k: null,
+      retrieved_doc_ids: [],
+      query_id: '',
+    },
+    model,
+    runs,
+  );
 }
 
 /**

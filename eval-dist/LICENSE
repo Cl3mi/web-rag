@@ -1,0 +1,61 @@
+EVALUATION LICENSE — web-rag eval-server image
+================================================
+
+Copyright (c) 2026 web-rag operator. All rights reserved.
+
+This software is provided to the named Licensee solely for the purpose of
+evaluating their own Retrieval-Augmented Generation system against the
+operator's reference system. Any other use is prohibited.
+
+PERMITTED USES
+--------------
+- Pull and run the container image `ghcr.io/<owner>/web-rag-eval` against
+  Licensee's own data and queries.
+- Submit query results through the `/api/external/*` endpoints exposed by
+  the container.
+- Export the JSON evaluation report and share it with the operator.
+
+PROHIBITED USES
+---------------
+- Reverse engineering, decompiling, disassembling, deobfuscating, extracting
+  prompts, or otherwise reconstructing the source code of the container.
+- Redistribution, sublicensing, or republishing of the container image or
+  any extracted artefact.
+- Use of the container for production traffic, paid services, or any
+  workload unrelated to the evaluation engagement.
+- Removal or alteration of authentication, telemetry, or licence checks.
+
+GHCR ACCESS TOKEN
+-----------------
+Pulling this image requires a personal access token with `read:packages`
+scope on `ghcr.io`. The operator will provide one of:
+
+  (a) a short-lived classic PAT pasted below, or
+  (b) an out-of-band link to a single-use credential.
+
+Do NOT commit this file with a populated token to any public location.
+Treat the token as a shared secret; if it leaks, notify the operator so
+the package can be re-scoped.
+
+  GHCR_USERNAME: <github-username-of-licensee>
+  GHCR_PAT:      <paste-token-here>
+
+Pull example:
+  echo "$GHCR_PAT" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin
+  docker pull ghcr.io/<owner>/web-rag-eval:latest
+
+TERMINATION
+-----------
+This licence terminates automatically on the earlier of (i) the end of the
+evaluation engagement as agreed in writing, (ii) the operator revoking the
+GHCR token, or (iii) any breach of the prohibited-use section above. Upon
+termination, the Licensee must `docker rmi` the image and delete any
+report data containing operator-supplied queries.
+
+NO WARRANTY
+-----------
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
