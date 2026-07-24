@@ -279,7 +279,7 @@ export function summarizeRows(rows: CollectorRow[]): ReportSummary {
 Run: `bun run test src/lib/server/collector/scoring.test.ts`
 Expected: PASS (3 files/describe blocks green).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/server/collector/scoring.ts src/lib/server/collector/scoring.test.ts
