@@ -1475,7 +1475,7 @@ git commit -m "feat(compare): run the LLM-judge over a report's rows"
 **Files:**
 - Create: `src/lib/server/compare/store.ts`
 
-- [ ] **Step 1: Write the implementation**
+- [x] **Step 1: Write the implementation**
 
 ```typescript
 // src/lib/server/compare/store.ts
