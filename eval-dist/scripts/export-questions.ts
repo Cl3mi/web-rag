@@ -2,7 +2,12 @@
 // Run from repo root: bun run eval-dist/scripts/export-questions.ts
 // Reads DATABASE_* from .env, writes eval-dist/seed/questions.json.
 import { writeFileSync } from 'node:fs';
-import { sql } from '../../src/lib/server/db/client';
+import postgres from 'postgres';
+import { getDatabaseUrl } from '../../src/lib/config/database';
+
+// Standalone connection (not src/lib/server/db/client) because this script runs via
+// plain `bun run` outside the SvelteKit/Vite runtime, which can't resolve $env/dynamic/private.
+const sql = postgres(getDatabaseUrl());
 
 const VERSION = process.env.QUESTION_SET_VERSION || 'v1';
 

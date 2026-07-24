@@ -977,7 +977,7 @@ process.exit(0);
 
 Run: `git rm eval-dist/scripts/export-queries.ts`
 
-- [ ] **Step 3: Type-check the script compiles (import path resolves)**
+- [x] **Step 3: Type-check the script compiles (import path resolves)**
 
 Run: `bun build eval-dist/scripts/export-questions.ts --target=node --outdir /tmp/ebuild >/dev/null && echo OK`
 Expected: `OK` (this only checks it bundles; DB connection is not exercised here).
