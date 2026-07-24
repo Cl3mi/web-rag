@@ -565,7 +565,7 @@ export function getCollectorStore(dbPath: string): CollectorStore {
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: PASS. (If `better-sqlite3` fails to load its native binary, run `bun pm trust better-sqlite3` then re-run.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/server/collector/store.ts src/lib/server/collector/store.test.ts
