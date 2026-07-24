@@ -360,7 +360,7 @@ describe('QuestionSet', () => {
 Run: `bun run test src/lib/server/collector/questions.test.ts`
 Expected: FAIL — cannot find module `./questions`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/questions.ts
