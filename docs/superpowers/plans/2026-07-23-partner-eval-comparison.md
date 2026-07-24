@@ -705,7 +705,7 @@ export const POST: RequestHandler = async ({ request }) => {
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/routes/api/external/run/+server.ts
