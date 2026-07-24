@@ -881,7 +881,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check + full test run**
+- [x] **Step 2: Type-check + full test run**
 
 Run: `bun run check && bun run test`
 Expected: no type errors; all collector tests pass.
