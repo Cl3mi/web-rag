@@ -426,7 +426,7 @@ export function getQuestionSet(): QuestionSet {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/questions.test.ts`
 Expected: PASS.

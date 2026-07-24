@@ -8,7 +8,9 @@ export default defineConfig({
 	},
 	resolve: {
 		alias: {
-			$lib: new URL('./src/lib', import.meta.url).pathname
+			$lib: new URL('./src/lib', import.meta.url).pathname,
+			'$env/dynamic/private': new URL('./src/lib/server/collector/test-support/env-dynamic-private.ts', import.meta.url)
+				.pathname
 		}
 	}
 });
