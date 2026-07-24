@@ -186,7 +186,7 @@ describe('summarizeRows', () => {
 Run: `bun run test src/lib/server/collector/scoring.test.ts`
 Expected: FAIL — cannot find module `./scoring`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/scoring.ts
