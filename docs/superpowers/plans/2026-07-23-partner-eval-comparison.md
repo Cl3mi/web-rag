@@ -1525,7 +1525,7 @@ export async function listComparisons(): Promise<{ id: string; labelA: string; l
 }
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
