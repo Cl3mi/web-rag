@@ -1649,7 +1649,7 @@ export const load: PageServerLoad = async () => {
 };
 ```
 
-- [ ] **Step 2: Write `+page.svelte`**
+- [x] **Step 2: Write `+page.svelte`**
 
 ```svelte
 <!-- src/routes/compare/+page.svelte -->
