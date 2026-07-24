@@ -1376,7 +1376,7 @@ export function aggregateJudged(systemLabel: string, rows: JudgedRow[]): SystemA
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/compare/aggregate.test.ts`
 Expected: PASS.
