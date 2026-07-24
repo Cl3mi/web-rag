@@ -603,7 +603,7 @@ export const GET: RequestHandler = async ({ request }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no errors introduced by this file.
