@@ -1102,7 +1102,7 @@ git commit -m "feat(collector): bundle questions.json + verify sqlite in image"
 - Modify (replace whole file): `eval-dist/.env.example`
 - Modify (replace whole file): `eval-dist/README.md`
 
-- [ ] **Step 1: Replace `eval-dist/.env.example`**
+- [x] **Step 1: Replace `eval-dist/.env.example`**
 
 ```dotenv
 # Shared secret. Must match the Authorization: Bearer token your app sends.
