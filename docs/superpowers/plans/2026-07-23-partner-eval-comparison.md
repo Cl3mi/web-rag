@@ -1619,7 +1619,7 @@ export const GET: RequestHandler = async ({ params }) => {
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/routes/api/compare/+server.ts "src/routes/api/compare/[id]/+server.ts"
