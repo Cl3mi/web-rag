@@ -1461,7 +1461,7 @@ export async function judgeReport(report: EvalReport): Promise<JudgedRow[]> {
 Run: `bun run check`
 Expected: no new errors. (Confirms `JudgeScores` fields `groundedness/completeness/answerQuality/hallucination/answerableFromContext` used here match `judge.ts`.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/lib/server/compare/judge-report.ts
