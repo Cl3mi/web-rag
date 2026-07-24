@@ -1087,7 +1087,7 @@ docker rm -f eval-smoke
 Expected: build prints `better-sqlite3 OK`; `/queries` returns the bundled set;
 logs show "Collector initialization complete".
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add eval-dist/Dockerfile
