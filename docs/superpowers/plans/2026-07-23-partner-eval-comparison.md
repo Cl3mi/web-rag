@@ -80,7 +80,7 @@ In `package.json` `"scripts"`, add:
 "test:watch": "vitest"
 ```
 
-- [ ] **Step 3: Create `vitest.config.ts`**
+- [x] **Step 3: Create `vitest.config.ts`**
 
 ```typescript
 import { defineConfig } from 'vitest/config';
