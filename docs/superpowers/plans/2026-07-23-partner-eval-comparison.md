@@ -982,7 +982,7 @@ Run: `git rm eval-dist/scripts/export-queries.ts`
 Run: `bun build eval-dist/scripts/export-questions.ts --target=node --outdir /tmp/ebuild >/dev/null && echo OK`
 Expected: `OK` (this only checks it bundles; DB connection is not exercised here).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add eval-dist/scripts/export-questions.ts
