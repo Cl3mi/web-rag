@@ -103,7 +103,7 @@ export default defineConfig({
 Run: `bun run test`
 Expected: exits 0 with "No test files found" (or similar). If it errors on config, fix before continuing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json bun.lock vitest.config.ts
