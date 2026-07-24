@@ -1637,7 +1637,7 @@ Svelte 5 runes.
 - Create: `src/routes/compare/+page.server.ts`
 - Create: `src/routes/compare/+page.svelte`
 
-- [ ] **Step 1: Write `+page.server.ts` (list prior comparisons)**
+- [x] **Step 1: Write `+page.server.ts` (list prior comparisons)**
 
 ```typescript
 // src/routes/compare/+page.server.ts
