@@ -62,7 +62,7 @@
 - Modify: `package.json`
 - Create: `vitest.config.ts`
 
-- [ ] **Step 1: Add dev deps and a test script**
+- [x] **Step 1: Add dev deps and a test script**
 
 Run:
 ```bash
