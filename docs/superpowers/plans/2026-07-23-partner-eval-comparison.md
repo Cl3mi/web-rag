@@ -1599,7 +1599,7 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 ```
 
-- [ ] **Step 2: Write `GET /api/compare/[id]`**
+- [x] **Step 2: Write `GET /api/compare/[id]`**
 
 ```typescript
 // src/routes/api/compare/[id]/+server.ts
