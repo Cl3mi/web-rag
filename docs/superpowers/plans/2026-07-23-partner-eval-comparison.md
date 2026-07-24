@@ -1381,7 +1381,7 @@ export function aggregateJudged(systemLabel: string, rows: JudgedRow[]): SystemA
 Run: `bun run test src/lib/server/compare/aggregate.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/server/compare/types.ts src/lib/server/compare/aggregate.ts src/lib/server/compare/aggregate.test.ts
