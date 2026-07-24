@@ -1028,7 +1028,7 @@ volumes:
   eval_data:
 ```
 
-- [ ] **Step 2: Remove obsolete files**
+- [x] **Step 2: Remove obsolete files**
 
 Run:
 ```bash
