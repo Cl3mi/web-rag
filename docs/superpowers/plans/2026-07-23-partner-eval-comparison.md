@@ -926,7 +926,7 @@ table (resolving `expected_document_ids` → document URLs).
 - Create: `eval-dist/scripts/export-questions.ts`
 - Delete: `eval-dist/scripts/export-queries.ts`
 
-- [ ] **Step 1: Write the script (mirror the resolution logic from the old /queries SQL)**
+- [x] **Step 1: Write the script (mirror the resolution logic from the old /queries SQL)**
 
 ```typescript
 // eval-dist/scripts/export-questions.ts
