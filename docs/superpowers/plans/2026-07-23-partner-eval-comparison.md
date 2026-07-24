@@ -998,7 +998,7 @@ git commit -m "feat(collector): export-questions script replaces queries.sql exp
 - Delete: `eval-dist/scripts/ollama-entrypoint.sh`
 - Delete: `eval-dist/seed/queries.sql`
 
-- [ ] **Step 1: Replace `eval-dist/docker-compose.yml`**
+- [x] **Step 1: Replace `eval-dist/docker-compose.yml`**
 
 ```yaml
 services:
