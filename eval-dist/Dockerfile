@@ -67,6 +67,8 @@ ENV EVAL_SERVER_MODE=1
 COPY --from=deps  /app/node_modules ./node_modules
 COPY --from=build /app/build        ./build
 COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/eval-dist/seed/questions.json ./seed/questions.json
+RUN mkdir -p /app/data
 
 # Drop any leftover dev artifacts and verify no .ts / .map remain
 RUN find . -name '*.ts' -not -path './node_modules/*' -delete \

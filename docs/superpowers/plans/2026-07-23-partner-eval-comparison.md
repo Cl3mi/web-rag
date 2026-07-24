@@ -1049,7 +1049,7 @@ git commit -m "feat(collector): single-service compose, no postgres/ollama"
 **Files:**
 - Modify: `eval-dist/Dockerfile`
 
-- [ ] **Step 1: Ship `seed/questions.json` into the runtime image**
+- [x] **Step 1: Ship `seed/questions.json` into the runtime image**
 
 In `eval-dist/Dockerfile`, in the `runtime` stage, after the existing
 `COPY --from=build /app/package.json ./package.json` line, add:
