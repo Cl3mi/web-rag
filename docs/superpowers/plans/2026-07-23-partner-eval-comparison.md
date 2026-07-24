@@ -906,7 +906,7 @@ curl -s -H "Authorization: Bearer testkey" "http://localhost:5173/api/external/r
 ```
 Expected: `/queries` lists q1/q2; `/run` returns `recallAt5:1`; `/report` returns a full report with one row and a summary. Stop the dev server and `rm -rf .tmp` after.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/hooks.server.ts
