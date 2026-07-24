@@ -1035,7 +1035,7 @@ Run:
 git rm eval-dist/scripts/ollama-entrypoint.sh eval-dist/seed/queries.sql
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add eval-dist/docker-compose.yml
