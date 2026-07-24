@@ -1286,7 +1286,7 @@ export interface ComparisonPayload {
 }
 ```
 
-- [ ] **Step 2: Write the failing test for aggregation**
+- [x] **Step 2: Write the failing test for aggregation**
 
 ```typescript
 // src/lib/server/compare/aggregate.test.ts
