@@ -622,7 +622,7 @@ git commit -m "feat(collector): serve bundled question set from /queries"
 **Files:**
 - Create: `src/routes/api/external/run/+server.ts`
 
-- [ ] **Step 1: Write the handler**
+- [x] **Step 1: Write the handler**
 
 ```typescript
 // src/routes/api/external/run/+server.ts
