@@ -786,7 +786,7 @@ git commit -m "feat(collector): assemble self-contained report.json from store"
 - Delete: `src/routes/api/external/judge/+server.ts`
 - Delete: `src/lib/server/external/storage.ts`
 
-- [ ] **Step 1: Remove the files**
+- [x] **Step 1: Remove the files**
 
 Run:
 ```bash
