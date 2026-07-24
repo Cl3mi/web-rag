@@ -72,7 +72,7 @@ bun add better-sqlite3@^11.8.0
 bun add -d @types/better-sqlite3@^7.6.11
 ```
 
-- [ ] **Step 2: Add the `test` script to `package.json`**
+- [x] **Step 2: Add the `test` script to `package.json`**
 
 In `package.json` `"scripts"`, add:
 ```json
