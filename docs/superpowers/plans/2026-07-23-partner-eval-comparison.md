@@ -820,7 +820,7 @@ call.
 **Files:**
 - Modify (replace whole file): `src/hooks.server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/hooks.server.ts
