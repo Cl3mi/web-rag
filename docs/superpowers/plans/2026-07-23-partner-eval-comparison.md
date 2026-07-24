@@ -274,7 +274,7 @@ export function summarizeRows(rows: CollectorRow[]): ReportSummary {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/scoring.test.ts`
 Expected: PASS (3 files/describe blocks green).
