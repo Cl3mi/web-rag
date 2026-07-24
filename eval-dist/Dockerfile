@@ -76,5 +76,7 @@ RUN find . -name '*.ts' -not -path './node_modules/*' -delete \
  && find . -name 'tsconfig*.json' -not -path './node_modules/*' -delete \
  && find . -name 'svelte.config*' -not -path './node_modules/*' -delete
 
+RUN node -e "require('better-sqlite3'); console.log('better-sqlite3 OK')"
+
 EXPOSE 3000
 CMD ["node", "build/index.js"]

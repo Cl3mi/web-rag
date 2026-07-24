@@ -1058,7 +1058,7 @@ COPY --from=build /app/eval-dist/seed/questions.json ./seed/questions.json
 RUN mkdir -p /app/data
 ```
 
-- [ ] **Step 2: Ensure the native `better-sqlite3` binary survives into runtime**
+- [x] **Step 2: Ensure the native `better-sqlite3` binary survives into runtime**
 
 The `deps` stage runs `bun install --no-progress --production`, which fetches
 the prebuilt `better-sqlite3` binary for linux. The runtime stage already does
