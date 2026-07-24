@@ -123,7 +123,7 @@ summarise a set of rows. Reuses `metrics.ts`.
 - Create: `src/lib/server/collector/scoring.ts`
 - Test: `src/lib/server/collector/scoring.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // src/lib/server/collector/scoring.test.ts
