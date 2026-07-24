@@ -581,7 +581,7 @@ git commit -m "feat(collector): sqlite store for collected runs"
 **Files:**
 - Modify (replace whole file): `src/routes/api/external/queries/+server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/routes/api/external/queries/+server.ts
