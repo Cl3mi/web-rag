@@ -66,7 +66,7 @@
 
 Run:
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 bun add -d vitest@^2.1.0
 bun add better-sqlite3@^11.8.0
 bun add -d @types/better-sqlite3@^7.6.11
@@ -790,7 +790,7 @@ git commit -m "feat(collector): assemble self-contained report.json from store"
 
 Run:
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 git rm src/routes/api/external/evaluate/+server.ts \
        src/routes/api/external/judge/+server.ts \
        src/lib/server/external/storage.ts
@@ -890,7 +890,7 @@ Expected: no type errors; all collector tests pass.
 
 Run (in one shell):
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 EVAL_SERVER_MODE=1 EVAL_API_KEY=testkey \
   QUESTIONS_PATH="$PWD/eval-dist/seed/questions.json" \
   COLLECTOR_DB_PATH="$PWD/.tmp/collector.db" \
@@ -1075,7 +1075,7 @@ RUN node -e "require('better-sqlite3'); console.log('better-sqlite3 OK')"
 
 Run (from repo root — build context is the repo so `eval-dist/seed` is reachable):
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 docker build -f eval-dist/Dockerfile -t web-rag-eval:local .
 docker run --rm -d --name eval-smoke -p 3001:3000 \
   -e EVAL_API_KEY=testkey web-rag-eval:local
@@ -1768,7 +1768,7 @@ export const load: PageServerLoad = async () => {
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Manual UI smoke test**
+- [ ] **Step 4: Manual UI smoke test** [manual]
 
 Prereq: Postgres + Ollama running (`docker compose --profile gpu up -d`), main
 app dev server up (`bun run dev`), and two `report.json` files produced by the
@@ -1830,7 +1830,7 @@ git commit -m "feat(compare): add /compare to navigation"
 Run: `bun run check && bun run test`
 Expected: no type errors; all `*.test.ts` pass.
 
-- [ ] **Step 2: End-to-end dry run**
+- [ ] **Step 2: End-to-end dry run** [manual]
 
 1. Build + boot the collector image (Task 11 Step 3), produce `report-a.json`
    with `systemLabel=system-a sessionId=a` and `report-b.json` with
@@ -1845,7 +1845,7 @@ judge means in 1–5).
 
 - [ ] **Step 3: Update CLAUDE.md architecture notes**
 
-In `/home/clemi/mci/web-rag/CLAUDE.md`, under "Evaluation system", add a short
+In `/home/dev/workspace/CLAUDE.md`, under "Evaluation system", add a short
 subsection documenting: the collector (`eval-dist/`, `/api/external/{queries,run,report}`,
 SQLite, bundled `questions.json`), the `report.json` schema, and the `/compare`
 flow (judges two reports with the same judge, persists to `comparison_runs`).
