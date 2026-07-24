@@ -1545,7 +1545,7 @@ git commit -m "feat(compare): persist judged comparisons in postgres"
 - Create: `src/routes/api/compare/+server.ts`
 - Create: `src/routes/api/compare/[id]/+server.ts`
 
-- [ ] **Step 1: Write `POST /api/compare`**
+- [x] **Step 1: Write `POST /api/compare`**
 
 ```typescript
 // src/routes/api/compare/+server.ts
