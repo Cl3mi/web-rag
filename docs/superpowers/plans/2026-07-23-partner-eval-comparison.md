@@ -560,7 +560,7 @@ export function getCollectorStore(dbPath: string): CollectorStore {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: PASS. (If `better-sqlite3` fails to load its native binary, run `bun pm trust better-sqlite3` then re-run.)
