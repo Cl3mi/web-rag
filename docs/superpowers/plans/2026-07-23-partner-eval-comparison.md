@@ -719,7 +719,7 @@ git commit -m "feat(collector): POST /run endpoint computes and stores metrics"
 **Files:**
 - Modify (replace whole file): `src/routes/api/external/report/+server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/routes/api/external/report/+server.ts
