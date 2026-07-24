@@ -1334,7 +1334,7 @@ describe('aggregateJudged', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/compare/aggregate.test.ts`
 Expected: FAIL — cannot find module `./aggregate`.
