@@ -322,7 +322,7 @@ Loads `questions.json` and answers `getQueries()` / `getExpectedUrls(queryId)` /
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```typescript
 // src/lib/server/collector/questions.test.ts
