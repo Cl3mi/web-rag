@@ -1215,7 +1215,7 @@ docker compose down -v   # stops the container AND deletes the SQLite scratch da
 ```
 ````
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add eval-dist/.env.example eval-dist/README.md
