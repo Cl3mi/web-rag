@@ -298,7 +298,7 @@ Loads `questions.json` and answers `getQueries()` / `getExpectedUrls(queryId)` /
 - Test: `src/lib/server/collector/questions.test.ts`
 - Create (fixture used by both test and runtime default): `eval-dist/seed/questions.json`
 
-- [ ] **Step 1: Create the seed fixture `eval-dist/seed/questions.json`**
+- [x] **Step 1: Create the seed fixture `eval-dist/seed/questions.json`**
 
 ```json
 {
