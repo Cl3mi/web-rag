@@ -495,7 +495,7 @@ describe('CollectorStore', () => {
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: FAIL — cannot find module `./store`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/store.ts
