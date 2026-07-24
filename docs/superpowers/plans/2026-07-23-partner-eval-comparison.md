@@ -1233,7 +1233,7 @@ git commit -m "docs(collector): rewrite env + README for single-container flow"
 - Create: `src/lib/server/compare/aggregate.ts`
 - Test: `src/lib/server/compare/aggregate.test.ts`
 
-- [ ] **Step 1: Create the shared report/judged types**
+- [x] **Step 1: Create the shared report/judged types**
 
 ```typescript
 // src/lib/server/compare/types.ts
