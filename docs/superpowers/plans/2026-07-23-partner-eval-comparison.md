@@ -98,7 +98,7 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Verify the runner works with no tests yet**
+- [x] **Step 4: Verify the runner works with no tests yet**
 
 Run: `bun run test`
 Expected: exits 0 with "No test files found" (or similar). If it errors on config, fix before continuing.
