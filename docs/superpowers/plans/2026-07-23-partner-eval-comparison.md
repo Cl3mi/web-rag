@@ -973,7 +973,7 @@ console.log(`Wrote ${out.queries.length} queries (version ${VERSION}) to eval-di
 process.exit(0);
 ```
 
-- [ ] **Step 2: Remove the old script**
+- [x] **Step 2: Remove the old script**
 
 Run: `git rm eval-dist/scripts/export-queries.ts`
 
