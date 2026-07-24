@@ -1399,7 +1399,7 @@ their judge scores zeroed (matching internal `/quality` storage) so
 **Files:**
 - Create: `src/lib/server/compare/judge-report.ts`
 
-- [ ] **Step 1: Write the implementation**
+- [x] **Step 1: Write the implementation**
 
 ```typescript
 // src/lib/server/compare/judge-report.ts
