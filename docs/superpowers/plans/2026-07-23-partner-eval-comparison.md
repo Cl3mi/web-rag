@@ -1112,7 +1112,7 @@ EVAL_API_KEY=change-me-to-a-long-random-string
 SYSTEM_LABEL=partner-org
 ```
 
-- [ ] **Step 2: Replace `eval-dist/README.md`**
+- [x] **Step 2: Replace `eval-dist/README.md`**
 
 ````markdown
 # web-rag eval collector
