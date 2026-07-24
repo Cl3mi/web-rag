@@ -490,7 +490,7 @@ describe('CollectorStore', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: FAIL — cannot find module `./store`.
