@@ -608,7 +608,7 @@ export const GET: RequestHandler = async ({ request }) => {
 Run: `bun run check`
 Expected: no errors introduced by this file.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/routes/api/external/queries/+server.ts
