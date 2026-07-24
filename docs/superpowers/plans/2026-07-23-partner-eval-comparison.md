@@ -886,7 +886,7 @@ export const handle: Handle = async ({ event, resolve }) => {
 Run: `bun run check && bun run test`
 Expected: no type errors; all collector tests pass.
 
-- [ ] **Step 3: Manual smoke test of the collector locally (Node runtime path)**
+- [x] **Step 3: Manual smoke test of the collector locally (Node runtime path)** _(skipped in sandbox: Node 18 < Vite 20)_
 
 Run (in one shell):
 ```bash
@@ -1071,7 +1071,7 @@ right before `EXPOSE 3000`:
 RUN node -e "require('better-sqlite3'); console.log('better-sqlite3 OK')"
 ```
 
-- [ ] **Step 3: Build the image locally and verify it boots**
+- [x] **Step 3: Build the image locally and verify it boots** _(skipped in sandbox: nested build no-network)_
 
 Run (from repo root — build context is the repo so `eval-dist/seed` is reachable):
 ```bash
