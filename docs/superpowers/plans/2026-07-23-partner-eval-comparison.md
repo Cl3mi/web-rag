@@ -446,7 +446,7 @@ git commit -m "feat(collector): bundled question set loader"
 - Create: `src/lib/server/collector/store.ts`
 - Test: `src/lib/server/collector/store.test.ts`
 
-- [ ] **Step 1: Write the failing test (uses a temp DB file)**
+- [x] **Step 1: Write the failing test (uses a temp DB file)**
 
 ```typescript
 // src/lib/server/collector/store.test.ts
