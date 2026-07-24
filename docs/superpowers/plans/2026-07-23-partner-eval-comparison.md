@@ -431,7 +431,7 @@ export function getQuestionSet(): QuestionSet {
 Run: `bun run test src/lib/server/collector/questions.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/server/collector/questions.ts src/lib/server/collector/questions.test.ts eval-dist/seed/questions.json
