@@ -802,7 +802,7 @@ rmdir src/routes/api/external/evaluate src/routes/api/external/judge 2>/dev/null
 Run: `grep -rn "external/storage\|external/evaluate\|external/judge" src/ || echo "clean"`
 Expected: `clean` (Task 8 removes the last `storage.ts` import in `hooks.server.ts`; if it still shows there, that is expected and fixed next task).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git commit -m "chore(collector): remove judge/evaluate endpoints and pg external store"
