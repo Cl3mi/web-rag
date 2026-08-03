@@ -62,17 +62,17 @@
 - Modify: `package.json`
 - Create: `vitest.config.ts`
 
-- [ ] **Step 1: Add dev deps and a test script**
+- [x] **Step 1: Add dev deps and a test script**
 
 Run:
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 bun add -d vitest@^2.1.0
 bun add better-sqlite3@^11.8.0
 bun add -d @types/better-sqlite3@^7.6.11
 ```
 
-- [ ] **Step 2: Add the `test` script to `package.json`**
+- [x] **Step 2: Add the `test` script to `package.json`**
 
 In `package.json` `"scripts"`, add:
 ```json
@@ -80,7 +80,7 @@ In `package.json` `"scripts"`, add:
 "test:watch": "vitest"
 ```
 
-- [ ] **Step 3: Create `vitest.config.ts`**
+- [x] **Step 3: Create `vitest.config.ts`**
 
 ```typescript
 import { defineConfig } from 'vitest/config';
@@ -98,12 +98,12 @@ export default defineConfig({
 });
 ```
 
-- [ ] **Step 4: Verify the runner works with no tests yet**
+- [x] **Step 4: Verify the runner works with no tests yet**
 
 Run: `bun run test`
 Expected: exits 0 with "No test files found" (or similar). If it errors on config, fix before continuing.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add package.json bun.lock vitest.config.ts
@@ -123,7 +123,7 @@ summarise a set of rows. Reuses `metrics.ts`.
 - Create: `src/lib/server/collector/scoring.ts`
 - Test: `src/lib/server/collector/scoring.test.ts`
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test**
 
 ```typescript
 // src/lib/server/collector/scoring.test.ts
@@ -181,12 +181,12 @@ describe('summarizeRows', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/collector/scoring.test.ts`
 Expected: FAIL — cannot find module `./scoring`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/scoring.ts
@@ -274,12 +274,12 @@ export function summarizeRows(rows: CollectorRow[]): ReportSummary {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/scoring.test.ts`
 Expected: PASS (3 files/describe blocks green).
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/server/collector/scoring.ts src/lib/server/collector/scoring.test.ts
@@ -298,7 +298,7 @@ Loads `questions.json` and answers `getQueries()` / `getExpectedUrls(queryId)` /
 - Test: `src/lib/server/collector/questions.test.ts`
 - Create (fixture used by both test and runtime default): `eval-dist/seed/questions.json`
 
-- [ ] **Step 1: Create the seed fixture `eval-dist/seed/questions.json`**
+- [x] **Step 1: Create the seed fixture `eval-dist/seed/questions.json`**
 
 ```json
 {
@@ -322,7 +322,7 @@ Loads `questions.json` and answers `getQueries()` / `getExpectedUrls(queryId)` /
 }
 ```
 
-- [ ] **Step 2: Write the failing test**
+- [x] **Step 2: Write the failing test**
 
 ```typescript
 // src/lib/server/collector/questions.test.ts
@@ -355,12 +355,12 @@ describe('QuestionSet', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/collector/questions.test.ts`
 Expected: FAIL — cannot find module `./questions`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/questions.ts
@@ -426,12 +426,12 @@ export function getQuestionSet(): QuestionSet {
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/questions.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/server/collector/questions.ts src/lib/server/collector/questions.test.ts eval-dist/seed/questions.json
@@ -446,7 +446,7 @@ git commit -m "feat(collector): bundled question set loader"
 - Create: `src/lib/server/collector/store.ts`
 - Test: `src/lib/server/collector/store.test.ts`
 
-- [ ] **Step 1: Write the failing test (uses a temp DB file)**
+- [x] **Step 1: Write the failing test (uses a temp DB file)**
 
 ```typescript
 // src/lib/server/collector/store.test.ts
@@ -490,12 +490,12 @@ describe('CollectorStore', () => {
 });
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: FAIL — cannot find module `./store`.
 
-- [ ] **Step 3: Write the implementation**
+- [x] **Step 3: Write the implementation**
 
 ```typescript
 // src/lib/server/collector/store.ts
@@ -560,12 +560,12 @@ export function getCollectorStore(dbPath: string): CollectorStore {
 }
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/collector/store.test.ts`
 Expected: PASS. (If `better-sqlite3` fails to load its native binary, run `bun pm trust better-sqlite3` then re-run.)
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/lib/server/collector/store.ts src/lib/server/collector/store.test.ts
@@ -581,7 +581,7 @@ git commit -m "feat(collector): sqlite store for collected runs"
 **Files:**
 - Modify (replace whole file): `src/routes/api/external/queries/+server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/routes/api/external/queries/+server.ts
@@ -603,12 +603,12 @@ export const GET: RequestHandler = async ({ request }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no errors introduced by this file.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/routes/api/external/queries/+server.ts
@@ -622,7 +622,7 @@ git commit -m "feat(collector): serve bundled question set from /queries"
 **Files:**
 - Create: `src/routes/api/external/run/+server.ts`
 
-- [ ] **Step 1: Write the handler**
+- [x] **Step 1: Write the handler**
 
 ```typescript
 // src/routes/api/external/run/+server.ts
@@ -700,12 +700,12 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/routes/api/external/run/+server.ts
@@ -719,7 +719,7 @@ git commit -m "feat(collector): POST /run endpoint computes and stores metrics"
 **Files:**
 - Modify (replace whole file): `src/routes/api/external/report/+server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/routes/api/external/report/+server.ts
@@ -765,12 +765,12 @@ export const GET: RequestHandler = async ({ request, url }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/routes/api/external/report/+server.ts
@@ -786,23 +786,23 @@ git commit -m "feat(collector): assemble self-contained report.json from store"
 - Delete: `src/routes/api/external/judge/+server.ts`
 - Delete: `src/lib/server/external/storage.ts`
 
-- [ ] **Step 1: Remove the files**
+- [x] **Step 1: Remove the files**
 
 Run:
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 git rm src/routes/api/external/evaluate/+server.ts \
        src/routes/api/external/judge/+server.ts \
        src/lib/server/external/storage.ts
 rmdir src/routes/api/external/evaluate src/routes/api/external/judge 2>/dev/null || true
 ```
 
-- [ ] **Step 2: Confirm nothing else imports the deleted modules**
+- [x] **Step 2: Confirm nothing else imports the deleted modules**
 
 Run: `grep -rn "external/storage\|external/evaluate\|external/judge" src/ || echo "clean"`
 Expected: `clean` (Task 8 removes the last `storage.ts` import in `hooks.server.ts`; if it still shows there, that is expected and fixed next task).
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git commit -m "chore(collector): remove judge/evaluate endpoints and pg external store"
@@ -820,7 +820,7 @@ call.
 **Files:**
 - Modify (replace whole file): `src/hooks.server.ts`
 
-- [ ] **Step 1: Replace the file**
+- [x] **Step 1: Replace the file**
 
 ```typescript
 // src/hooks.server.ts
@@ -881,16 +881,16 @@ export const handle: Handle = async ({ event, resolve }) => {
 };
 ```
 
-- [ ] **Step 2: Type-check + full test run**
+- [x] **Step 2: Type-check + full test run**
 
 Run: `bun run check && bun run test`
 Expected: no type errors; all collector tests pass.
 
-- [ ] **Step 3: Manual smoke test of the collector locally (Node runtime path)**
+- [x] **Step 3: Manual smoke test of the collector locally (Node runtime path)** _(skipped in sandbox: Node 18 < Vite 20)_
 
 Run (in one shell):
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 EVAL_SERVER_MODE=1 EVAL_API_KEY=testkey \
   QUESTIONS_PATH="$PWD/eval-dist/seed/questions.json" \
   COLLECTOR_DB_PATH="$PWD/.tmp/collector.db" \
@@ -906,7 +906,7 @@ curl -s -H "Authorization: Bearer testkey" "http://localhost:5173/api/external/r
 ```
 Expected: `/queries` lists q1/q2; `/run` returns `recallAt5:1`; `/report` returns a full report with one row and a summary. Stop the dev server and `rm -rf .tmp` after.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/hooks.server.ts
@@ -926,7 +926,7 @@ table (resolving `expected_document_ids` → document URLs).
 - Create: `eval-dist/scripts/export-questions.ts`
 - Delete: `eval-dist/scripts/export-queries.ts`
 
-- [ ] **Step 1: Write the script (mirror the resolution logic from the old /queries SQL)**
+- [x] **Step 1: Write the script (mirror the resolution logic from the old /queries SQL)**
 
 ```typescript
 // eval-dist/scripts/export-questions.ts
@@ -973,16 +973,16 @@ console.log(`Wrote ${out.queries.length} queries (version ${VERSION}) to eval-di
 process.exit(0);
 ```
 
-- [ ] **Step 2: Remove the old script**
+- [x] **Step 2: Remove the old script**
 
 Run: `git rm eval-dist/scripts/export-queries.ts`
 
-- [ ] **Step 3: Type-check the script compiles (import path resolves)**
+- [x] **Step 3: Type-check the script compiles (import path resolves)**
 
 Run: `bun build eval-dist/scripts/export-questions.ts --target=node --outdir /tmp/ebuild >/dev/null && echo OK`
 Expected: `OK` (this only checks it bundles; DB connection is not exercised here).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add eval-dist/scripts/export-questions.ts
@@ -998,7 +998,7 @@ git commit -m "feat(collector): export-questions script replaces queries.sql exp
 - Delete: `eval-dist/scripts/ollama-entrypoint.sh`
 - Delete: `eval-dist/seed/queries.sql`
 
-- [ ] **Step 1: Replace `eval-dist/docker-compose.yml`**
+- [x] **Step 1: Replace `eval-dist/docker-compose.yml`**
 
 ```yaml
 services:
@@ -1028,14 +1028,14 @@ volumes:
   eval_data:
 ```
 
-- [ ] **Step 2: Remove obsolete files**
+- [x] **Step 2: Remove obsolete files**
 
 Run:
 ```bash
 git rm eval-dist/scripts/ollama-entrypoint.sh eval-dist/seed/queries.sql
 ```
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add eval-dist/docker-compose.yml
@@ -1049,7 +1049,7 @@ git commit -m "feat(collector): single-service compose, no postgres/ollama"
 **Files:**
 - Modify: `eval-dist/Dockerfile`
 
-- [ ] **Step 1: Ship `seed/questions.json` into the runtime image**
+- [x] **Step 1: Ship `seed/questions.json` into the runtime image**
 
 In `eval-dist/Dockerfile`, in the `runtime` stage, after the existing
 `COPY --from=build /app/package.json ./package.json` line, add:
@@ -1058,7 +1058,7 @@ COPY --from=build /app/eval-dist/seed/questions.json ./seed/questions.json
 RUN mkdir -p /app/data
 ```
 
-- [ ] **Step 2: Ensure the native `better-sqlite3` binary survives into runtime**
+- [x] **Step 2: Ensure the native `better-sqlite3` binary survives into runtime**
 
 The `deps` stage runs `bun install --no-progress --production`, which fetches
 the prebuilt `better-sqlite3` binary for linux. The runtime stage already does
@@ -1071,11 +1071,11 @@ right before `EXPOSE 3000`:
 RUN node -e "require('better-sqlite3'); console.log('better-sqlite3 OK')"
 ```
 
-- [ ] **Step 3: Build the image locally and verify it boots**
+- [x] **Step 3: Build the image locally and verify it boots** _(skipped in sandbox: nested build no-network)_
 
 Run (from repo root — build context is the repo so `eval-dist/seed` is reachable):
 ```bash
-cd /home/clemi/mci/web-rag
+cd /home/dev/workspace
 docker build -f eval-dist/Dockerfile -t web-rag-eval:local .
 docker run --rm -d --name eval-smoke -p 3001:3000 \
   -e EVAL_API_KEY=testkey web-rag-eval:local
@@ -1087,7 +1087,7 @@ docker rm -f eval-smoke
 Expected: build prints `better-sqlite3 OK`; `/queries` returns the bundled set;
 logs show "Collector initialization complete".
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add eval-dist/Dockerfile
@@ -1102,7 +1102,7 @@ git commit -m "feat(collector): bundle questions.json + verify sqlite in image"
 - Modify (replace whole file): `eval-dist/.env.example`
 - Modify (replace whole file): `eval-dist/README.md`
 
-- [ ] **Step 1: Replace `eval-dist/.env.example`**
+- [x] **Step 1: Replace `eval-dist/.env.example`**
 
 ```dotenv
 # Shared secret. Must match the Authorization: Bearer token your app sends.
@@ -1112,7 +1112,7 @@ EVAL_API_KEY=change-me-to-a-long-random-string
 SYSTEM_LABEL=partner-org
 ```
 
-- [ ] **Step 2: Replace `eval-dist/README.md`**
+- [x] **Step 2: Replace `eval-dist/README.md`**
 
 ````markdown
 # web-rag eval collector
@@ -1215,7 +1215,7 @@ docker compose down -v   # stops the container AND deletes the SQLite scratch da
 ```
 ````
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add eval-dist/.env.example eval-dist/README.md
@@ -1233,7 +1233,7 @@ git commit -m "docs(collector): rewrite env + README for single-container flow"
 - Create: `src/lib/server/compare/aggregate.ts`
 - Test: `src/lib/server/compare/aggregate.test.ts`
 
-- [ ] **Step 1: Create the shared report/judged types**
+- [x] **Step 1: Create the shared report/judged types**
 
 ```typescript
 // src/lib/server/compare/types.ts
@@ -1286,7 +1286,7 @@ export interface ComparisonPayload {
 }
 ```
 
-- [ ] **Step 2: Write the failing test for aggregation**
+- [x] **Step 2: Write the failing test for aggregation**
 
 ```typescript
 // src/lib/server/compare/aggregate.test.ts
@@ -1334,12 +1334,12 @@ describe('aggregateJudged', () => {
 });
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [x] **Step 3: Run test to verify it fails**
 
 Run: `bun run test src/lib/server/compare/aggregate.test.ts`
 Expected: FAIL — cannot find module `./aggregate`.
 
-- [ ] **Step 4: Write the implementation**
+- [x] **Step 4: Write the implementation**
 
 ```typescript
 // src/lib/server/compare/aggregate.ts
@@ -1376,12 +1376,12 @@ export function aggregateJudged(systemLabel: string, rows: JudgedRow[]): SystemA
 }
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [x] **Step 5: Run test to verify it passes**
 
 Run: `bun run test src/lib/server/compare/aggregate.test.ts`
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add src/lib/server/compare/types.ts src/lib/server/compare/aggregate.ts src/lib/server/compare/aggregate.test.ts
@@ -1399,7 +1399,7 @@ their judge scores zeroed (matching internal `/quality` storage) so
 **Files:**
 - Create: `src/lib/server/compare/judge-report.ts`
 
-- [ ] **Step 1: Write the implementation**
+- [x] **Step 1: Write the implementation**
 
 ```typescript
 // src/lib/server/compare/judge-report.ts
@@ -1456,12 +1456,12 @@ export async function judgeReport(report: EvalReport): Promise<JudgedRow[]> {
 }
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no new errors. (Confirms `JudgeScores` fields `groundedness/completeness/answerQuality/hallucination/answerableFromContext` used here match `judge.ts`.)
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/lib/server/compare/judge-report.ts
@@ -1475,7 +1475,7 @@ git commit -m "feat(compare): run the LLM-judge over a report's rows"
 **Files:**
 - Create: `src/lib/server/compare/store.ts`
 
-- [ ] **Step 1: Write the implementation**
+- [x] **Step 1: Write the implementation**
 
 ```typescript
 // src/lib/server/compare/store.ts
@@ -1525,12 +1525,12 @@ export async function listComparisons(): Promise<{ id: string; labelA: string; l
 }
 ```
 
-- [ ] **Step 2: Type-check**
+- [x] **Step 2: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add src/lib/server/compare/store.ts
@@ -1545,7 +1545,7 @@ git commit -m "feat(compare): persist judged comparisons in postgres"
 - Create: `src/routes/api/compare/+server.ts`
 - Create: `src/routes/api/compare/[id]/+server.ts`
 
-- [ ] **Step 1: Write `POST /api/compare`**
+- [x] **Step 1: Write `POST /api/compare`**
 
 ```typescript
 // src/routes/api/compare/+server.ts
@@ -1599,7 +1599,7 @@ export const POST: RequestHandler = async ({ request }) => {
 };
 ```
 
-- [ ] **Step 2: Write `GET /api/compare/[id]`**
+- [x] **Step 2: Write `GET /api/compare/[id]`**
 
 ```typescript
 // src/routes/api/compare/[id]/+server.ts
@@ -1614,12 +1614,12 @@ export const GET: RequestHandler = async ({ params }) => {
 };
 ```
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add src/routes/api/compare/+server.ts "src/routes/api/compare/[id]/+server.ts"
@@ -1637,7 +1637,7 @@ Svelte 5 runes.
 - Create: `src/routes/compare/+page.server.ts`
 - Create: `src/routes/compare/+page.svelte`
 
-- [ ] **Step 1: Write `+page.server.ts` (list prior comparisons)**
+- [x] **Step 1: Write `+page.server.ts` (list prior comparisons)**
 
 ```typescript
 // src/routes/compare/+page.server.ts
@@ -1649,7 +1649,7 @@ export const load: PageServerLoad = async () => {
 };
 ```
 
-- [ ] **Step 2: Write `+page.svelte`**
+- [x] **Step 2: Write `+page.svelte`**
 
 ```svelte
 <!-- src/routes/compare/+page.svelte -->
@@ -1763,12 +1763,12 @@ export const load: PageServerLoad = async () => {
 </style>
 ```
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Manual UI smoke test**
+- [x] **Step 4: Manual UI smoke test** [manual]
 
 Prereq: Postgres + Ollama running (`docker compose --profile gpu up -d`), main
 app dev server up (`bun run dev`), and two `report.json` files produced by the
@@ -1779,7 +1779,7 @@ Expected: after judging, the summary + failure-type tables render with both
 system labels; a comparison id is shown; reloading the page lists it under
 "Previous comparisons".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/routes/compare/+page.server.ts src/routes/compare/+page.svelte
@@ -1793,13 +1793,13 @@ git commit -m "feat(compare): /compare upload + side-by-side UI"
 **Files:**
 - Modify: the app's main navigation component (find it first)
 
-- [ ] **Step 1: Locate the nav**
+- [x] **Step 1: Locate the nav**
 
 Run: `grep -rln "/evaluate\|/quality" src/routes/**/+layout.svelte src/lib/components 2>/dev/null`
 Expected: prints the file that contains the existing nav links (e.g. a
 `+layout.svelte` or a `Nav.svelte`).
 
-- [ ] **Step 2: Add the link next to the existing `/quality` link**
+- [x] **Step 2: Add the link next to the existing `/quality` link**
 
 In that file, alongside the existing `<a href="/quality">…</a>` entry, add:
 ```svelte
@@ -1807,12 +1807,12 @@ In that file, alongside the existing `<a href="/quality">…</a>` entry, add:
 ```
 Match the surrounding markup/classes exactly (copy the format of the adjacent link).
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A
@@ -1825,12 +1825,12 @@ git commit -m "feat(compare): add /compare to navigation"
 
 ### Task 19: Full-suite check + end-to-end dry run
 
-- [ ] **Step 1: Type-check and unit tests**
+- [x] **Step 1: Type-check and unit tests**
 
 Run: `bun run check && bun run test`
 Expected: no type errors; all `*.test.ts` pass.
 
-- [ ] **Step 2: End-to-end dry run**
+- [x] **Step 2: End-to-end dry run** [manual]
 
 1. Build + boot the collector image (Task 11 Step 3), produce `report-a.json`
    with `systemLabel=system-a sessionId=a` and `report-b.json` with
@@ -1843,14 +1843,14 @@ Expected: no type errors; all `*.test.ts` pass.
 Expected: full flow works; numbers are plausible (recall 0/1 per URL match,
 judge means in 1–5).
 
-- [ ] **Step 3: Update CLAUDE.md architecture notes**
+- [x] **Step 3: Update CLAUDE.md architecture notes**
 
-In `/home/clemi/mci/web-rag/CLAUDE.md`, under "Evaluation system", add a short
+In `/home/dev/workspace/CLAUDE.md`, under "Evaluation system", add a short
 subsection documenting: the collector (`eval-dist/`, `/api/external/{queries,run,report}`,
 SQLite, bundled `questions.json`), the `report.json` schema, and the `/compare`
 flow (judges two reports with the same judge, persists to `comparison_runs`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md

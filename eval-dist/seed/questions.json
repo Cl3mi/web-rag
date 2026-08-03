@@ -1,0 +1,19 @@
+{
+  "version": "v1",
+  "queries": [
+    {
+      "id": "q1",
+      "query": "What are the tuition fees for the master's program?",
+      "category": "pricing",
+      "difficulty": "easy",
+      "expectedUrls": ["https://www.mci.edu/en/study/master"]
+    },
+    {
+      "id": "q2",
+      "query": "When is the application deadline?",
+      "category": "dates",
+      "difficulty": "medium",
+      "expectedUrls": ["https://www.mci.edu/en/application"]
+    }
+  ]
+}
