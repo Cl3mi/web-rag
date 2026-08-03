@@ -1779,7 +1779,7 @@ Expected: after judging, the summary + failure-type tables render with both
 system labels; a comparison id is shown; reloading the page lists it under
 "Previous comparisons".
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/routes/compare/+page.server.ts src/routes/compare/+page.svelte
