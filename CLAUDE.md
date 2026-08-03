@@ -87,6 +87,13 @@ Singleton lazy-loaded `Xenova/bge-m3` model (1024d dense + BM25-style sparse). F
 
 Unanswerable rows (where judge says context lacks the answer) have all scores stored as 0 to prevent inflation of averages. `NULLIF(..., 0)` in quality queries excludes these rows.
 
+**Partner collector (`eval-dist/`):** A standalone distributable image (`eval-dist/Dockerfile`, `docker-compose.yml`) that partners run against their own RAG system to produce a comparable report, without access to this repo's Postgres/pipelines. It exposes three API-key-gated routes:
+- `GET /api/external/queries` — returns the bundled question set (`eval-dist/seed/questions.json`, loaded via `getQuestionSet()`/`QUESTIONS_PATH`) as `{ id, query, category, difficulty, expectedUrls }[]`.
+- `POST /api/external/run` — partner posts one query's `answer`/`context`/`retrievedUrls`/latency; the collector scores retrieval metrics (`scoreRow()` in `collector/scoring.ts`) and stores a `CollectorRow` in its own SQLite DB (`COLLECTOR_DB_PATH`), keyed by `sessionId`.
+- `GET /api/external/report?sessionId=…` — returns the accumulated `report.json` for that session: `{ systemLabel, sessionId, questionSetVersion, generatedAt, rows: CollectorRow[], summary: ReportSummary }` (see `EvalReport` in `compare/types.ts`).
+
+**`/compare` flow:** upload two `report.json` files (e.g. `system-a` and `system-b`) to `POST /api/compare`. Each report's rows are judged with the *same* judge model/logic as `/quality` (`judgeReport()` in `compare/judge-report.ts` calls `judgeAnswer`/`classifyFailureType` from `evaluation/judge.ts`, zeroing unanswerable rows the same way), then aggregated per system (`compare/aggregate.ts`) into judge means, hallucination rate, failure-type counts, and latency breakdowns. The resulting `ComparisonPayload` is persisted to `comparison_runs` (`compare/store.ts`) so `/compare` can list and reload past comparisons without re-judging.
+
 ### Key configuration constants
 
 - `EMBEDDING_DIMENSION = 1024` — BGE-M3 output size

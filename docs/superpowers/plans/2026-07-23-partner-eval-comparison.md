@@ -1843,7 +1843,7 @@ Expected: no type errors; all `*.test.ts` pass.
 Expected: full flow works; numbers are plausible (recall 0/1 per URL match,
 judge means in 1–5).
 
-- [ ] **Step 3: Update CLAUDE.md architecture notes**
+- [x] **Step 3: Update CLAUDE.md architecture notes**
 
 In `/home/dev/workspace/CLAUDE.md`, under "Evaluation system", add a short
 subsection documenting: the collector (`eval-dist/`, `/api/external/{queries,run,report}`,
