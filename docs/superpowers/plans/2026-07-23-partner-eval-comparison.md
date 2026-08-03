@@ -1850,7 +1850,7 @@ subsection documenting: the collector (`eval-dist/`, `/api/external/{queries,run
 SQLite, bundled `questions.json`), the `report.json` schema, and the `/compare`
 flow (judges two reports with the same judge, persists to `comparison_runs`).
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add CLAUDE.md
