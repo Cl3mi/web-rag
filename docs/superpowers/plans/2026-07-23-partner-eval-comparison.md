@@ -1768,7 +1768,7 @@ export const load: PageServerLoad = async () => {
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Manual UI smoke test** [manual]
+- [x] **Step 4: Manual UI smoke test** [manual]
 
 Prereq: Postgres + Ollama running (`docker compose --profile gpu up -d`), main
 app dev server up (`bun run dev`), and two `report.json` files produced by the
