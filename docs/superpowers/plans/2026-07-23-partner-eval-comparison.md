@@ -1830,7 +1830,7 @@ git commit -m "feat(compare): add /compare to navigation"
 Run: `bun run check && bun run test`
 Expected: no type errors; all `*.test.ts` pass.
 
-- [ ] **Step 2: End-to-end dry run** [manual]
+- [x] **Step 2: End-to-end dry run** [manual]
 
 1. Build + boot the collector image (Task 11 Step 3), produce `report-a.json`
    with `systemLabel=system-a sessionId=a` and `report-b.json` with
