@@ -1793,13 +1793,13 @@ git commit -m "feat(compare): /compare upload + side-by-side UI"
 **Files:**
 - Modify: the app's main navigation component (find it first)
 
-- [ ] **Step 1: Locate the nav**
+- [x] **Step 1: Locate the nav**
 
 Run: `grep -rln "/evaluate\|/quality" src/routes/**/+layout.svelte src/lib/components 2>/dev/null`
 Expected: prints the file that contains the existing nav links (e.g. a
 `+layout.svelte` or a `Nav.svelte`).
 
-- [ ] **Step 2: Add the link next to the existing `/quality` link**
+- [x] **Step 2: Add the link next to the existing `/quality` link**
 
 In that file, alongside the existing `<a href="/quality">…</a>` entry, add:
 ```svelte
@@ -1807,12 +1807,12 @@ In that file, alongside the existing `<a href="/quality">…</a>` entry, add:
 ```
 Match the surrounding markup/classes exactly (copy the format of the adjacent link).
 
-- [ ] **Step 3: Type-check**
+- [x] **Step 3: Type-check**
 
 Run: `bun run check`
 Expected: no new errors.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add -A

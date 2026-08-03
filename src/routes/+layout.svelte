@@ -32,6 +32,7 @@
     { href: '/knowledge', label: 'Knowledge', icon: '📚' },
     { href: '/evaluate', label: 'Evaluate', icon: '📈' },
     { href: '/quality', label: 'Quality', icon: '🎯' },
+    { href: '/compare', label: 'Compare', icon: '🔀' },
     { href: '/conversations', label: 'Conversations', icon: '💬' },
     { href: '/settings', label: 'Widget', icon: '⚙️' },
   ];
