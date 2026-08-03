@@ -1825,7 +1825,7 @@ git commit -m "feat(compare): add /compare to navigation"
 
 ### Task 19: Full-suite check + end-to-end dry run
 
-- [ ] **Step 1: Type-check and unit tests**
+- [x] **Step 1: Type-check and unit tests**
 
 Run: `bun run check && bun run test`
 Expected: no type errors; all `*.test.ts` pass.
